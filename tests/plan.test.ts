@@ -187,3 +187,23 @@ describe('plan edits', () => {
     expect(p.steps.slice(1, 3).map((s) => (s.kind === 'segment' ? s.seg : -1))).toEqual([1, 0]);
   });
 });
+
+describe('problem stages', () => {
+  it('tags each problem with the job step it belongs to', () => {
+    const job = vtailJob();
+    const gapped = generateCut(root, tip, { ...job, plan: removeStep(loopPlan(8), 3) }, machine);
+    expect(gapped.errorStages).toEqual(['sequence']);
+    expect(gapped.warnings.find((w) => w.message.includes('never cut'))?.stage).toBe('sequence');
+
+    const tiny = { ...machine, travel: { x: [0, 1] as [number, number], y: [0, 1] as [number, number] } };
+    expect(generateCut(root, tip, job, tiny).warnings.find((w) => w.message.includes('travel'))?.stage).toBe('path');
+
+    expect(generateCut(root, tip, { ...job, span: 0 }, machine).errorStages).toEqual(['setup']);
+    const tri = chainProfile([
+      { pts: [{ x: 0, y: 0 }, { x: 1, y: 0 }], source: 'LINE' },
+      { pts: [{ x: 1, y: 0 }, { x: 0, y: 1 }], source: 'LINE' },
+      { pts: [{ x: 0, y: 1 }, { x: 0, y: 0 }], source: 'LINE' },
+    ]).profile!;
+    expect(generateCut(root, tri, job, machine).errorStages).toEqual(['segment']);
+  });
+});

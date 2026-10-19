@@ -9,6 +9,7 @@ import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
 import { addPin, addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, type Side, type SyncEdit } from '../core/sync/edit';
 import type { MachinePreset } from '../core/types';
+import type { StepId } from './steps';
 
 /** Which face(s) to draw: root, tip or both. */
 export type Sides = 'root' | 'tip' | 'both';
@@ -36,6 +37,11 @@ interface Props {
   onSelectStep: (i: number | null) => void;
   sides: Sides;
   rootSide: 'left' | 'right';
+  /**
+   * Which job page is showing. Each page only offers its own edits: split/pin editing on
+   * Segment, LE/TE picks on Transform, plan lines and run-outs on Sequence; the rest is view-only.
+   */
+  mode: StepId;
   /** Receives edits in cut space (result.sync numbering); the App stores them. */
   onSyncChange: (e: SyncEdit) => void;
   /** Use split k on one profile as its LE or TE (for the twist pivot). */
@@ -304,8 +310,15 @@ export function Preview2D(props: Props) {
     return ks.filter((s, i) => i % every === 0 || s.boundary);
   })();
 
+  const edit = {
+    sync: props.mode === 'segment',
+    chord: props.mode === 'transform',
+    plan: props.mode === 'sequence',
+  };
+  const showMarkers = edit.sync || edit.chord || edit.plan;
+
   const handles =
-    plan && layers.plan
+    plan && layers.plan && edit.plan
       ? Object.entries(plan.points).flatMap(([id, p]) => {
           const h = (role: 'p' | 'r' | 't', at: Vec2, color: string) => (
             <circle
@@ -371,7 +384,7 @@ export function Preview2D(props: Props) {
           if (sd) {
             if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
             sd.moved = true;
-            if (!sync || !arcs || drawing) return;
+            if (!sync || !arcs || drawing || !edit.sync) return;
             const sNew = sOnProfile(sd.side, toWorld(e.clientX, e.clientY));
             if (sd.kind === 'split') {
               const ed = moveSplit(sync, plan, arcs, sd.side, sd.i, sNew);
@@ -467,7 +480,7 @@ export function Preview2D(props: Props) {
               const arrow = run.speed === 'gap' ? undefined : `url(#arrow-${run.speed})`;
               const clickLine = (e: React.MouseEvent) => {
                 e.stopPropagation();
-                if (drawing) return;
+                if (drawing || !edit.plan) return;
                 props.onSelectStep(run.step);
                 if (run.line && run.step >= 0) setMenu({ kind: 'line', step: run.step, at: toWorld(e.clientX, e.clientY), ...toWrap(e.clientX, e.clientY) });
               };
@@ -496,7 +509,7 @@ export function Preview2D(props: Props) {
             />
           )}
         </g>
-        {layers.profiles && arcs && !drawing && (
+        {layers.profiles && arcs && !drawing && edit.sync && (
           <g fill="none">
             {showR && (
               <polygon className="clickable" points={pts(rootPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('root', e)}>
@@ -516,12 +529,12 @@ export function Preview2D(props: Props) {
           result.pinPts.root.map((p, i) => (
             <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
           ))}
-        {result?.chord && layers.profiles && showR && chordMarks('root', 'var(--root)')}
-        {result?.chord && layers.profiles && showT && chordMarks('tip', 'var(--tip)')}
-        {result && showR && pins('root', -0.6)}
-        {result && showT && pins('tip', 2)}
-        {result && showR && markers('root', 'var(--root)', -0.6)}
-        {result && showT && markers('tip', 'var(--tip)', 2)}
+        {result?.chord && edit.chord && showR && chordMarks('root', 'var(--root)')}
+        {result?.chord && edit.chord && showT && chordMarks('tip', 'var(--tip)')}
+        {result && edit.sync && showR && pins('root', -0.6)}
+        {result && edit.sync && showT && pins('tip', 2)}
+        {result && showMarkers && showR && markers('root', 'var(--root)', -0.6)}
+        {result && showMarkers && showT && markers('tip', 'var(--tip)', 2)}
         {handles}
       </svg>
 
@@ -537,12 +550,13 @@ export function Preview2D(props: Props) {
           {menu.kind === 'split' ? (
             <>
               <div className="popover-title">Split {menu.k + 1} ({menu.side})</div>
-              {menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
-              {menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
-              {sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
-              {menuItem(`Use as ${menu.side} LE (twist pivot)`, () => props.onChordPick(menu.side, 'le', menu.k))}
-              {menuItem(`Use as ${menu.side} TE (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.k))}
-              {sync &&
+              {edit.plan && menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
+              {edit.plan && menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
+              {edit.sync && sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
+              {edit.chord && menuItem(`Use as ${menu.side} LE (twist pivot)`, () => props.onChordPick(menu.side, 'le', menu.k))}
+              {edit.chord && menuItem(`Use as ${menu.side} TE (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.k))}
+              {edit.sync &&
+                sync &&
                 sync.root.length > 1 &&
                 menuItem('Remove split (both profiles)', () => {
                   const ed = removeSplit(sync, plan, menu.k);

@@ -13,8 +13,12 @@ import { offsetStations, type Station } from './kerf';
 import { kerfAt } from './kerfTable';
 import { applyToProfile, defaultTransforms, sideTransform, syncToRaw, syncToTransformed } from './transform';
 
+/** The job step a problem belongs to (matches the app's pages; 'path' = the finished cut path). */
+export type Stage = 'import' | 'setup' | 'transform' | 'segment' | 'sequence' | 'path';
+
 export interface CutWarning {
   message: string;
+  stage: Stage;
   /** Index into `moves` where the problem first appears, when it has a location. */
   moveIndex?: number;
   /** Plan step the problem belongs to, when it has one. */
@@ -24,6 +28,8 @@ export interface CutWarning {
 export interface CutResult {
   ok: boolean;
   errors: string[];
+  /** Step each error belongs to (same order as `errors`). */
+  errorStages: Stage[];
   warnings: CutWarning[];
   /**
    * Sync as cut: positions on the transformed outlines (`arcs`), in the cut's loop order, so
@@ -69,11 +75,12 @@ export function projector(job: JobSettings, machine: MachinePreset) {
   return (r: Vec2, t: Vec2): CarriagePos => ({ left: lerp(r, t, a), right: lerp(r, t, b) });
 }
 
-function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
+function emptyResult(errors: string[], stage: Stage, warnings: CutWarning[] = []): CutResult {
   const z = { x: 0, y: 0 };
   return {
     ok: false,
     errors,
+    errorStages: errors.map(() => stage),
     warnings,
     sync: null,
     arcs: null,
@@ -125,11 +132,11 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   const errors: string[] = [];
   const warnings: CutWarning[] = [];
 
-  if (job.span <= 0) return emptyResult(['Block span must be greater than zero.']);
-  if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.']);
+  if (job.span <= 0) return emptyResult(['Block span must be greater than zero.'], 'setup');
+  if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.'], 'setup');
 
   const T = job.transforms ?? defaultTransforms();
-  if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.']);
+  if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.'], 'transform');
 
   // 1. Transform each profile (twist / scale / flip / move about its pivot, then the part offset)
   const raw = { root: arcLoop(rootIn), tip: arcLoop(tipIn) };
@@ -162,7 +169,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     return Object.assign(
       emptyResult([
         `Root has ${syncT.root.length} segments but tip has ${syncT.tip.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
-      ]),
+      ], 'segment'),
       extra,
     );
   }
@@ -171,7 +178,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   // 3. Resample each matched pair (and pin spans) to equal counts
   const synced = syncStations(rootArc, tipArc, syncT, job.sampling);
   const stations: Station[] = synced.stations;
-  warnings.push(...synced.warnings.map((message) => ({ message })));
+  warnings.push(...synced.warnings.map((message) => ({ message, stage: 'segment' as const })));
 
   // 4. Kerf, on the full closed loop. Segment overrides win; otherwise fixed per face, or from
   //    the material's kerf table at the speed each face actually moves at that point.
@@ -180,7 +187,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   let kerfFor = (side: 'root' | 'tip') => (_i: number, seg: number) => over[seg]?.kerf ?? job.kerf[side];
   if (job.kerf.mode === 'auto') {
     if (!job.kerfTable?.length) {
-      warnings.push({ message: 'Auto kerf needs a kerf table in the material (use the kerf test). Using the fixed root/tip kerf instead.' });
+      warnings.push({ stage: 'setup', message: 'Auto kerf needs a kerf table in the material (use the kerf test). Using the fixed root/tip kerf instead.' });
     } else {
       let clamped = 0;
       const faceKerf = (side: 'root' | 'tip') =>
@@ -198,7 +205,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
       const table = { root: faceKerf('root'), tip: faceKerf('tip') };
       kerfFor = (side) => (i, seg) => over[seg]?.kerf ?? table[side][i];
       if (clamped) {
-        warnings.push({ message: `${clamped} point${clamped === 1 ? ' moves' : 's move'} faster or slower than the kerf table covers; the nearest table kerf was used.` });
+        warnings.push({ stage: 'setup', message: `${clamped} point${clamped === 1 ? ' moves' : 's move'} faster or slower than the kerf table covers; the nearest table kerf was used.` });
       }
     }
   }
@@ -212,7 +219,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   try {
     walk = walkPlan(plan, splitOffsetLoop(kerfStations, n), home);
   } catch (e) {
-    const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`]);
+    const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`], 'sequence');
     Object.assign(res, { ...extra, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
     return res;
   }
@@ -224,8 +231,8 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     );
   }
   walk.segUse.forEach((count, k) => {
-    if (count === 0) warnings.push({ message: `Segment ${k + 1} is never cut.` });
-    if (count > 1) warnings.push({ message: `Segment ${k + 1} is cut ${count} times.` });
+    if (count === 0) warnings.push({ stage: 'sequence', message: `Segment ${k + 1} is never cut.` });
+    if (count > 1) warnings.push({ stage: 'sequence', message: `Segment ${k + 1} is cut ${count} times.` });
   });
 
   // 6. Project and time each move
@@ -287,12 +294,13 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   }
   if (capped) {
     warnings.push({
+      stage: 'path',
       message: `${capped} move${capped === 1 ? '' : 's'} would drive a carriage at up to ${maxCarriageSpeed.toFixed(2)} ${machine.units}/min, over the machine cap of ${machine.maxSpeed}. Those moves are slowed to the cap in the G-code.`,
       moveIndex: firstCapped,
     });
   }
   for (const s of jogHits) {
-    warnings.push({ message: `Step ${s + 1} is a jog through the foam block; it would cut at jog speed. Make it a cut or route it around the block.`, step: s });
+    warnings.push({ stage: 'sequence', message: `Step ${s + 1} is a jog through the foam block; it would cut at jog speed. Make it a cut or route it around the block.`, step: s });
   }
 
   // 6. Cut lines that stop inside the block
@@ -303,7 +311,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
         const pt = plan.points[id];
         const pts = pt?.kind === 'free' ? [pt.p] : pt?.kind === 'freePair' ? [pt.r, pt.t] : [];
         if (pts.some((q) => inside(q, job.block))) {
-          warnings.push({ message: `Step ${i + 1} ends inside the foam block; the wire would stop in the foam.`, step: i });
+          warnings.push({ stage: 'sequence', message: `Step ${i + 1} ends inside the foam block; the wire would stop in the foam.`, step: i });
           break;
         }
       }
@@ -317,13 +325,14 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   const firstOut = moves.findIndex((m) => outside(m.left) || outside(m.right));
   if (firstOut >= 0) {
     const count = moves.filter((m) => outside(m.left) || outside(m.right)).length;
-    warnings.push({ message: `${count} move${count === 1 ? ' goes' : 's go'} outside the machine travel limits.`, moveIndex: firstOut });
+    warnings.push({ stage: 'path', message: `${count} move${count === 1 ? ' goes' : 's go'} outside the machine travel limits.`, moveIndex: firstOut });
   }
 
   const ok = errors.length === 0;
   return {
     ok,
     errors,
+    errorStages: errors.map(() => 'sequence' as const),
     warnings,
     ...extra,
     stations: closeLoop(stations),
