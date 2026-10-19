@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { testMachine } from './testMachine';
 import { describe, expect, it } from 'vitest';
 import { generateCut } from '../src/core/cut/pipeline';
 import { defaultTransforms, type Transforms } from '../src/core/cut/transform';
@@ -8,13 +9,13 @@ import { autoChord } from '../src/core/geom/chord';
 import { signedArea } from '../src/core/geom/profile';
 import type { Vec2 } from '../src/core/geom/vec';
 import { loadDxfProfile } from '../src/core/io/loadProfile';
-import { defaultJob, machines, materials } from '../src/core/presets';
+import { defaultJob, materials } from '../src/core/presets';
 import { addSplit } from '../src/core/sync/edit';
 import { autoSync } from '../src/core/sync/sync';
 import type { JobSettings } from '../src/core/types';
 
 const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-const machine = machines.find((m) => m.id === 'shop-4axis')!;
+const machine = testMachine;
 const material = materials.find((m) => m.id === 'default-foam')!;
 const root = loadDxfProfile(fx('vtail-root.dxf'), 'in').profile!;
 const tip = loadDxfProfile(fx('vtail-tip.dxf'), 'in').profile!;

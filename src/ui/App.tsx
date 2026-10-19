@@ -109,7 +109,7 @@ export function App() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(AUTOSAVE);
-      if (saved) openProject(saved, 'Restored your last session from this browser.');
+      if (saved) openProject(saved, 'Restored your last session from this browser.', true);
     } catch {
       /* nothing usable saved */
     }
@@ -128,10 +128,11 @@ export function App() {
     return () => clearTimeout(t);
   }, [rootFile, tipFile, job, machine, material]);
 
-  function openProject(text: string, message: string) {
+  /** `current`: restoring this browser's session, so use the latest version of its presets. */
+  function openProject(text: string, message: string, current = false) {
     const p = parseProject(text);
-    setMachineId(presets.adopt('machine', p.machine));
-    setMaterialId(presets.adopt('material', p.material));
+    setMachineId(presets.adopt('machine', p.machine, current));
+    setMaterialId(presets.adopt('material', p.material, current));
     setRootFile(p.root);
     setTipFile(p.tip);
     setJob(p.job); // already normalized for older projects

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { testMachine } from './testMachine';
 import { offsetStations, type Station } from '../src/core/cut/kerf';
 import { generateCut, projector } from '../src/core/cut/pipeline';
 import { evalNurbs } from '../src/core/geom/nurbs';
@@ -6,11 +7,11 @@ import { chainProfile, signedArea, type Profile } from '../src/core/geom/profile
 import { distToSegment, len, type Vec2 } from '../src/core/geom/vec';
 import { parseGcode } from '../src/core/gcode/parser';
 import { parseDxf } from '../src/core/io/dxf';
-import { defaultJob, machines, materials } from '../src/core/presets';
+import { defaultJob, materials } from '../src/core/presets';
 import { resamplePair } from '../src/core/sync/resample';
 import type { MachinePreset } from '../src/core/types';
 
-const machine: MachinePreset = machines.find((m) => m.id === 'shop-4axis')!;
+const machine: MachinePreset = testMachine;
 const material = materials.find((m) => m.id === 'default-foam')!;
 
 function dxf(entities: string): string {

@@ -7,7 +7,7 @@ import { insertOutAndBack, insertPointOnLine, insertRunOut, removeStep, reverseS
 import type { CutPlan, PlanPoint } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
-import { addPin, addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, type Side, type SyncEdit } from '../core/sync/edit';
+import { addPin, addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setPinLinked, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
 import type { MachinePreset } from '../core/types';
 import type { StepId } from './steps';
 
@@ -58,7 +58,7 @@ type Menu =
   | { kind: 'split'; k: number; side: Side; sx: number; sy: number }
   | { kind: 'line'; step: number; at: Vec2; sx: number; sy: number }
   | { kind: 'profile'; side: Side; s: number; sx: number; sy: number }
-  | { kind: 'pin'; i: number; sx: number; sy: number };
+  | { kind: 'pin'; i: number; side: Side; sx: number; sy: number };
 
 interface Drawing {
   fromSplit: number;
@@ -256,7 +256,7 @@ export function Preview2D(props: Props) {
       const y = -p.y;
       return (
         <g key={`${color}-${k}`} className="clickable" onPointerDown={startSyncDrag('split', side, k)}>
-          <title>{`Split ${k + 1}: click for options, drag to slide along the profile`}</title>
+          <title>{`Split ${k + 1}${sync?.linked?.[k] ? ' (linked)' : ''}: click for options, drag to slide along the profile`}</title>
           <circle cx={x} cy={y} r={unit * 0.8} fill="transparent" />
           <circle cx={x} cy={y} r={unit * (k === 0 ? 0.27 : 0.17)} fill={k === 0 ? color : 'var(--canvas)'} stroke={color} strokeWidth={unit * 0.07} />
         </g>
@@ -461,7 +461,7 @@ export function Preview2D(props: Props) {
             if (sd.moved) return;
             if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
             else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
-            else setMenu({ kind: 'pin', i: sd.i, ...toWrap(e.clientX, e.clientY) });
+            else setMenu({ kind: 'pin', i: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
             return;
           }
           if (pointDrag.current) {
@@ -564,8 +564,17 @@ export function Preview2D(props: Props) {
           showR &&
           showT &&
           result.pinPts.root.map((p, i) => (
-            <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray={sync?.pins[i]?.linked ? undefined : '3 3'} vectorEffect="non-scaling-stroke" />
           ))}
+        {result &&
+          showR &&
+          showT &&
+          showMarkers &&
+          result.splitPts.root.map((p, k) =>
+            sync?.linked?.[k] ? (
+              <line key={`splitlink-${k}`} x1={p.x} y1={-p.y} x2={result.splitPts.tip[k].x} y2={-result.splitPts.tip[k].y} stroke="var(--text)" opacity={0.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+            ) : null,
+          )}
         {result?.chord && edit.chord && showR && chordMarks('root', 'var(--root)')}
         {result?.chord && edit.chord && showT && chordMarks('tip', 'var(--tip)')}
         {result && showMarkers && edit.sync && showR && pins('root')}
@@ -596,6 +605,12 @@ export function Preview2D(props: Props) {
               <div className="popover-title">Split {menu.k + 1} ({menu.side})</div>
               {edit.plan && menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
               {edit.plan && menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
+              {edit.sync &&
+                sync &&
+                arcs &&
+                menuItem(sync.linked?.[menu.k] ? 'Unlink from the other profile' : 'Link to the other profile (keep relative position)', () =>
+                  props.onSyncChange({ sync: setSplitLinked(sync, arcs, menu.side, menu.k, !sync.linked?.[menu.k]), plan }),
+                )}
               {edit.sync && sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
               {edit.sync &&
                 sync &&
@@ -628,6 +643,11 @@ export function Preview2D(props: Props) {
           ) : menu.kind === 'pin' ? (
             <>
               <div className="popover-title">Pin {menu.i + 1}</div>
+              {sync &&
+                arcs &&
+                menuItem(sync.pins[menu.i]?.linked ? 'Unlink ends' : 'Link ends (keep relative position)', () =>
+                  props.onSyncChange({ sync: setPinLinked(sync, arcs, menu.i, menu.side, !sync.pins[menu.i]?.linked), plan }),
+                )}
               {sync && menuItem('Remove pin', () => props.onSyncChange({ sync: removePin(sync, menu.i), plan }))}
             </>
           ) : (

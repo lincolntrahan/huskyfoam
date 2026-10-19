@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { testMachine } from './testMachine';
 import { describe, expect, it } from 'vitest';
 import { generateCut } from '../src/core/cut/pipeline';
 import { arcLoop, pointAtS, sliceS, spanS } from '../src/core/geom/arc';
@@ -7,13 +8,13 @@ import { chainProfile, type Profile } from '../src/core/geom/profile';
 import { loadDxfProfile } from '../src/core/io/loadProfile';
 import { leTePlan, loopPlan } from '../src/core/plan/templates';
 import { remapRemove } from '../src/core/plan/remap';
-import { defaultJob, machines, materials } from '../src/core/presets';
-import { addPin, addSplit, moveSplit, removeSplit, setLoopStart } from '../src/core/sync/edit';
+import { defaultJob, materials } from '../src/core/presets';
+import { addPin, addSplit, movePin, moveSplit, removeSplit, setLoopStart, setPinLinked, setSplitLinked } from '../src/core/sync/edit';
 import { autoSync, locate } from '../src/core/sync/sync';
 import type { JobSettings } from '../src/core/types';
 
 const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-const machine = machines.find((m) => m.id === 'shop-4axis')!;
+const machine = testMachine;
 const material = materials.find((m) => m.id === 'default-foam')!;
 const root = loadDxfProfile(fx('vtail-root.dxf'), 'in').profile!;
 const tip = loadDxfProfile(fx('vtail-tip.dxf'), 'in').profile!;
@@ -158,5 +159,60 @@ describe('profile-agnostic helpers', () => {
     const a = arcLoop(sq);
     expect(locate(a, [0, 2, 4, 6], 5)).toEqual({ k: 2, f: 0.5 });
     expect(locate(a, [6, 0, 2, 4], 7)).toEqual({ k: 0, f: 0.5 }); // segment crossing the wrap point
+  });
+});
+
+describe('linked splits and pins', () => {
+  // fraction of split i between its neighbours on one side
+  const frac = (list: number[], side: 'root' | 'tip', i: number) => {
+    const n = list.length;
+    const prev = list[(i - 1 + n) % n];
+    const a = arcs[side];
+    return ((list[i] - prev + a.length) % a.length) / spanS(a, prev, list[(i + 1) % n]);
+  };
+
+  it('linking snaps the partner to the same relative position, and dragging keeps it there', () => {
+    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
+    expect(linked.linked).toEqual([false, false, true, false, false, false, false, false]);
+    expect(frac(linked.tip, 'tip', 2)).toBeCloseTo(frac(linked.root, 'root', 2), 9);
+    const sNew = auto.root[2] + 0.3 * (auto.root[3] - auto.root[2]);
+    const moved = moveSplit(linked, null, arcs, 'root', 2, sNew)!.sync;
+    expect(moved.tip[2]).not.toBeCloseTo(linked.tip[2], 3);
+    expect(frac(moved.tip, 'tip', 2)).toBeCloseTo(frac(moved.root, 'root', 2), 9);
+    // the other splits don't move
+    expect(moved.tip.filter((_, j) => j !== 2)).toEqual(auto.tip.filter((_, j) => j !== 2));
+  });
+
+  it('unlinked splits move one side only', () => {
+    const sNew = auto.root[2] + 0.3 * (auto.root[3] - auto.root[2]);
+    expect(moveSplit(auto, null, arcs, 'root', 2, sNew)!.sync.tip).toEqual(auto.tip);
+  });
+
+  it('link flags follow inserts, removals and loop-start changes', () => {
+    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
+    const added = addSplit(linked, null, arcs, 'root', (auto.root[0] + auto.root[1]) / 2)!.sync;
+    expect(added.linked!.indexOf(true)).toBe(3);
+    expect(removeSplit(added, null, 1)!.sync.linked!.indexOf(true)).toBe(2);
+    expect(setLoopStart(linked, null, 2).sync.linked![0]).toBe(true);
+  });
+
+  it('a linked pin moves both ends', () => {
+    const sRoot = (auto.root[1] + auto.root[2]) / 2;
+    const pinned = addPin(auto, arcs, 'root', sRoot)!;
+    const loose = movePin(pinned, arcs, 0, 'root', sRoot + 0.1);
+    expect(loose.pins[0].tip).toBe(pinned.pins[0].tip);
+    const tied = setPinLinked(pinned, arcs, 0, 'root', true);
+    const moved = movePin(tied, arcs, 0, 'root', sRoot + 0.1);
+    const r = locate(arcs.root, auto.root, moved.pins[0].root)!;
+    const t = locate(arcs.tip, auto.tip, moved.pins[0].tip)!;
+    expect(t.k).toBe(r.k);
+    expect(t.f).toBeCloseTo(r.f, 9);
+  });
+
+  it('link flags survive a mirrored transform round trip', () => {
+    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
+    const res = run({ sync: linked, transforms: { ...vtailJob().transforms, flipH: true } });
+    expect(res.sync!.linked!.filter(Boolean)).toHaveLength(1);
+    expect(res.syncToJob!(res.sync!).linked).toEqual(linked.linked);
   });
 });

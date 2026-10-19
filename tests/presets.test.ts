@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { testMachine } from './testMachine';
 import { describe, expect, it } from 'vitest';
 import { kerfTableFromMeasurements, kerfTestGcode, defaultKerfTest } from '../src/core/cut/kerfTest';
 import { kerfAt } from '../src/core/cut/kerfTable';
@@ -12,7 +13,7 @@ import { defaultJob, machines, materials } from '../src/core/presets';
 import type { JobSettings } from '../src/core/types';
 
 const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-const machine = machines.find((m) => m.id === 'shop-4axis')!;
+const machine = testMachine;
 const material = materials.find((m) => m.id === 'default-foam')!;
 const rootText = fx('vtail-root.dxf');
 const tipText = fx('vtail-tip.dxf');

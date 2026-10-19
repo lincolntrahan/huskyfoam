@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { testMachine } from './testMachine';
 import { describe, expect, it } from 'vitest';
 import { generateCut } from '../src/core/cut/pipeline';
 import { comparePaths } from '../src/core/gcode/compare';
 import { parseGcode } from '../src/core/gcode/parser';
 import { loadDxfProfile } from '../src/core/io/loadProfile';
-import { defaultJob, machines, materials } from '../src/core/presets';
+import { defaultJob, materials } from '../src/core/presets';
 
 const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 
@@ -17,7 +18,7 @@ const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.m
  *   block span 12.07 centered, kerf 0.0998 root / 0.1116 tip, part offset (4.7221, 0.7001), 200 mm/min.
  */
 function vtail(mode: 'uniform' | 'adaptive' = 'uniform') {
-  const machine = machines.find((m) => m.id === 'shop-4axis')!;
+  const machine = testMachine;
   const material = materials.find((m) => m.id === 'default-foam')!;
   const job = defaultJob(machine, material);
   job.span = 12.07;
@@ -30,7 +31,7 @@ function vtail(mode: 'uniform' | 'adaptive' = 'uniform') {
   return { machine, res: generateCut(root, tip, job, machine) };
 }
 
-const reference = () => parseGcode(fx('vtail-devfoam.nc'), machines.find((m) => m.id === 'shop-4axis')!.axes);
+const reference = () => parseGcode(fx('vtail-devfoam.nc'), testMachine.axes);
 
 describe('V-tail sanity check vs DevFoam', () => {
   for (const mode of ['uniform', 'adaptive'] as const) {

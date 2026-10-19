@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { testMachine } from './testMachine';
 import { describe, expect, it } from 'vitest';
 import { generateCut } from '../src/core/cut/pipeline';
 import { chainProfile, type Profile } from '../src/core/geom/profile';
@@ -6,11 +7,11 @@ import { loadDxfProfile } from '../src/core/io/loadProfile';
 import { bridgeGap, insertOutAndBack, insertPointOnLine, moveStep, removeStep, setSpeed } from '../src/core/plan/edit';
 import { HOME, splitId, type CutPlan } from '../src/core/plan/model';
 import { leTePlan, loopPlan } from '../src/core/plan/templates';
-import { defaultJob, machines, materials } from '../src/core/presets';
+import { defaultJob, materials } from '../src/core/presets';
 import type { JobSettings } from '../src/core/types';
 
 const fx = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-const machine = machines.find((m) => m.id === 'shop-4axis')!;
+const machine = testMachine;
 const material = materials.find((m) => m.id === 'default-foam')!;
 const root = loadDxfProfile(fx('vtail-root.dxf'), 'in').profile!;
 const tip = loadDxfProfile(fx('vtail-tip.dxf'), 'in').profile!;

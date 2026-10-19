@@ -27,6 +27,14 @@ On **Import Geometry** each file is drawn with all of its entities:
 - *Auto pick* (the default) uses the largest closed outline.
 - The status line says whether your selection forms a closed outline.
 
+### Block position (Define Setup)
+
+Setup talks in left and right carriages, like DevFoam:
+
+- Enter the **block width** (left face to right face, along the wire).
+- Then measure the gap from **either** carriage to the block. Typing the left gap fills in the right one (right = carriage spacing − width − left), and the other way round.
+- **Root profile on** picks which carriage cuts the root DXF.
+
 ### 3D view
 
 The **2D / 3D** switch above the canvas works on every page, and *Preview Cut Path* opens in 3D. It shows:
@@ -48,6 +56,10 @@ Splits are where root and tip are matched (segment N on the root is cut with seg
 - **Drag** a split or pin marker to slide it along its own profile.
 - **Click a split** for *Make loop start* or *Remove split* (removes the pair).
 - **Pins** (purple diamonds) line up a root point with a tip point inside a segment (e.g. LE to LE) without creating a new segment.
+- **Link**: click a split or pin and choose *Link* to keep its root and tip ends at the same relative position while you drag either one.
+  - A linked split keeps the same fraction of the stretch between its neighbouring splits.
+  - A linked pin keeps the same fraction of its segment.
+  - Linking snaps the other end to match the one you clicked. Linked splits get a white connector line, and linked pins a solid one.
 - *Reset splits & pins to automatic* undoes all of it.
 
 When splits change, a custom cut plan is carried over where possible. If it can't be, it resets to Loop and tells you.

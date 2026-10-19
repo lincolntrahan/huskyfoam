@@ -30,6 +30,13 @@ export const slug = (name: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '') || 'preset';
 
+/** Short stable hash of a string (FNV-1a), for ids. */
+const hash = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+};
+
 /** Repo presets (read-only) + presets saved in this browser + snapshots from opened projects. */
 export function usePresets() {
   const [local, setLocal] = useState({ machine: read<MachinePreset>(KEY.machine), material: read<MaterialPreset>(KEY.material) });
@@ -56,15 +63,22 @@ export function usePresets() {
   }
 
   /**
-   * Make a project's snapshot selectable. If an existing preset is identical it's reused;
-   * otherwise the snapshot is listed as "(from project)". Returns the id to select.
+   * Make a project's snapshot selectable. If an existing preset has the same settings it's
+   * reused; otherwise the snapshot is listed as "(from project)". With `current` (restoring this
+   * browser's last session) a team or browser preset with the same id wins, so edits to it apply.
+   * Returns the id to select.
    */
-  function adopt<K extends PresetKind>(kind: K, p: K extends 'machine' ? MachinePreset : MaterialPreset): string {
-    const all = [...(kind === 'machine' ? repoMachines : repoMaterials), ...local[kind], ...project[kind]] as { id: string }[];
-    const same = all.find((x) => JSON.stringify(x) === JSON.stringify(p));
+  function adopt<K extends PresetKind>(kind: K, p: K extends 'machine' ? MachinePreset : MaterialPreset, current = false): string {
+    const own = [...(kind === 'machine' ? repoMachines : repoMaterials), ...local[kind]] as { id: string; name: string }[];
+    if (current && own.some((x) => x.id === p.id)) return p.id;
+    const all = [...own, ...project[kind]] as { id: string; name: string }[];
+    const settings = (x: { id: string; name: string }) => JSON.stringify({ ...x, id: '', name: '' });
+    const same = all.find((x) => settings(x) === settings(p));
     if (same) return same.id;
-    const id = `project-${slug(p.name)}-${Date.now().toString(36)}`;
-    setProject((s) => ({ ...s, [kind]: [...s[kind], { ...p, id, name: `${p.name} (from project)` }] }));
+    const base = p.name.replace(/( \(from project\))+$/, '');
+    // the id comes from the settings, so adopting the same snapshot twice lists it once
+    const id = `project-${slug(base)}-${hash(settings(p))}`;
+    setProject((s) => (s[kind].some((x) => x.id === id) ? s : { ...s, [kind]: [...s[kind], { ...p, id, name: `${base} (from project)` }] }));
     return id;
   }
 

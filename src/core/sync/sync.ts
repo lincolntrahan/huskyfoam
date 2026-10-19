@@ -9,6 +9,8 @@ import { autoSplits, defaultStart } from './segments';
 export interface Pin {
   root: number;
   tip: number;
+  /** Dragging one end moves the other to the same fraction of its segment. */
+  linked?: boolean;
 }
 
 /**
@@ -19,6 +21,8 @@ export interface SyncSettings {
   root: number[];
   tip: number[];
   pins: Pin[];
+  /** Per split (same order): dragging one side moves the other to the same relative position. */
+  linked?: boolean[];
 }
 
 /** Default sync: entity boundaries + sharp corners, loop starting at the -X-most split. */
