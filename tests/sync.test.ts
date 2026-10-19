@@ -172,29 +172,32 @@ describe('linked splits and pins', () => {
     return ((list[i] - prev + a.length) % a.length) / spanS(a, prev, list[(i + 1) % n]);
   };
 
-  it('linking snaps the partner to the same relative position, and dragging keeps it there', () => {
-    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
-    expect(linked.linked).toEqual([false, false, true, false, false, false, false, false]);
-    expect(frac(linked.tip, 'tip', 2)).toBeCloseTo(frac(linked.root, 'root', 2), 9);
+  it('splits are linked by default: dragging one side moves the other to the same relative position', () => {
     const sNew = auto.root[2] + 0.3 * (auto.root[3] - auto.root[2]);
-    const moved = moveSplit(linked, null, arcs, 'root', 2, sNew)!.sync;
-    expect(moved.tip[2]).not.toBeCloseTo(linked.tip[2], 3);
+    const moved = moveSplit(auto, null, arcs, 'root', 2, sNew)!.sync;
+    expect(moved.tip[2]).not.toBeCloseTo(auto.tip[2], 3);
     expect(frac(moved.tip, 'tip', 2)).toBeCloseTo(frac(moved.root, 'root', 2), 9);
     // the other splits don't move
     expect(moved.tip.filter((_, j) => j !== 2)).toEqual(auto.tip.filter((_, j) => j !== 2));
   });
 
-  it('unlinked splits move one side only', () => {
+  it('unlinked splits move one side only, and linking again snaps the partner', () => {
+    const free = setSplitLinked(auto, arcs, 'root', 2, false);
+    expect(free.linked).toEqual([true, true, false, true, true, true, true, true]);
     const sNew = auto.root[2] + 0.3 * (auto.root[3] - auto.root[2]);
-    expect(moveSplit(auto, null, arcs, 'root', 2, sNew)!.sync.tip).toEqual(auto.tip);
+    const moved = moveSplit(free, null, arcs, 'root', 2, sNew)!.sync;
+    expect(moved.tip).toEqual(auto.tip);
+    const relinked = setSplitLinked(moved, arcs, 'root', 2, true);
+    expect(frac(relinked.tip, 'tip', 2)).toBeCloseTo(frac(relinked.root, 'root', 2), 9);
   });
 
   it('link flags follow inserts, removals and loop-start changes', () => {
-    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
-    const added = addSplit(linked, null, arcs, 'root', (auto.root[0] + auto.root[1]) / 2)!.sync;
-    expect(added.linked!.indexOf(true)).toBe(3);
-    expect(removeSplit(added, null, 1)!.sync.linked!.indexOf(true)).toBe(2);
-    expect(setLoopStart(linked, null, 2).sync.linked![0]).toBe(true);
+    const free = setSplitLinked(auto, arcs, 'root', 2, false);
+    const added = addSplit(free, null, arcs, 'root', (auto.root[0] + auto.root[1]) / 2)!.sync;
+    expect(added.linked!.indexOf(false)).toBe(3);
+    expect(added.linked![1]).toBe(true); // a new split is linked
+    expect(removeSplit(added, null, 1)!.sync.linked!.indexOf(false)).toBe(2);
+    expect(setLoopStart(free, null, 2).sync.linked![0]).toBe(false);
   });
 
   it('a linked pin moves both ends', () => {
@@ -211,9 +214,9 @@ describe('linked splits and pins', () => {
   });
 
   it('link flags survive a mirrored transform round trip', () => {
-    const linked = setSplitLinked(auto, arcs, 'root', 2, true);
-    const res = run({ sync: linked, transforms: { ...vtailJob().transforms, flipH: true } });
-    expect(res.sync!.linked!.filter(Boolean)).toHaveLength(1);
-    expect(res.syncToJob!(res.sync!).linked).toEqual(linked.linked);
+    const free = setSplitLinked(auto, arcs, 'root', 2, false);
+    const res = run({ sync: free, transforms: { ...vtailJob().transforms, flipH: true } });
+    expect(res.sync!.linked!.filter((x) => !x)).toHaveLength(1);
+    expect(res.syncToJob!(res.sync!).linked).toEqual(free.linked);
   });
 });

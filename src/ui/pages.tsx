@@ -6,6 +6,7 @@ import { loopPlan, type Rect } from '../core/plan/templates';
 import type { JobSettings, MachinePreset, MaterialPreset, SegmentOverride } from '../core/types';
 import type { KerfSide } from '../core/cut/contours';
 import { defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
+import { pairColor } from './DxfPicker';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel } from './PlanPanel';
 import { download } from './PresetEditor';
@@ -145,6 +146,7 @@ export function ImportPage(c: PageCtx) {
         </small>
         <FileRow label="Root" color="var(--root)" file={c.rootFile} loaded={c.root} onLoad={c.loadRoot} />
         <FileRow label="Tip" color="var(--tip)" file={c.tipFile} loaded={c.tip} onLoad={c.loadTip} />
+        <small className="hint">If a profile comes in on its side (CAD and cutter axes differ), turn it with the ⟲ / ⟳ 90° buttons above its picker.</small>
         <div className="row-buttons">
           <button onClick={c.loadExample}>Load V-tail example</button>
           <button className="danger" disabled={!c.rootFile && !c.tipFile} onClick={c.resetProject} title="Clear both profiles and every job setting (presets are kept)">
@@ -152,6 +154,7 @@ export function ImportPage(c: PageCtx) {
           </button>
         </div>
       </section>
+      <PairingSection {...c} />
     </>
   );
 }
@@ -314,14 +317,20 @@ export function SetupPage(c: PageCtx) {
 const kind = (closed: boolean) => (closed ? 'closed' : 'open');
 const SIDE_LABEL: Record<KerfSide, string> = { auto: 'Auto', outside: 'Outside', inside: 'Inside', left: 'Left of path', right: 'Right of path', none: 'None (on the line)' };
 
-/** Pair root contours with tip contours, and pick each pair's kerf side. Shown when a profile has several contours. */
-function ContoursSection(c: PageCtx) {
-  const { job, patch, result } = c;
+/** Which tip contour each root contour is cut with, as shown and set on Import. */
+function currentPairs(c: PageCtx): number[] {
+  const roots = c.root?.contours ?? [];
+  return roots.map((_, r) => c.result?.pairs.find((p) => p.root === r)?.tip ?? c.job.contours.pairs?.[r] ?? (r === 0 ? 0 : -1));
+}
+
+/** Pair root contours with tip contours. Shown on Import when a profile has several contours. */
+function PairingSection(c: PageCtx) {
+  const { job, patch } = c;
   const roots = c.root?.contours ?? [];
   const tips = c.tip?.contours ?? [];
   if (roots.length < 2 && tips.length < 2) return null;
-  const pairOf = (r: number) => result?.pairs.find((p) => p.root === r);
-  const current = roots.map((_, r) => pairOf(r)?.tip ?? job.contours.pairs?.[r] ?? -1);
+  const current = currentPairs(c);
+  const pairNo = (r: number) => c.result?.pairs.findIndex((p) => p.root === r) ?? -1;
   const setPair = (r: number, t: number) => {
     const pairs = current.slice();
     // a tip contour pairs with one root contour at a time
@@ -333,36 +342,35 @@ function ContoursSection(c: PageCtx) {
     delete sync[r];
     patch({ contours: { ...job.contours, pairs, sync }, plan: null });
   };
-  const setSide = (r: number, side: KerfSide) => patch({ contours: { ...job.contours, kerfSide: { ...job.contours.kerfSide, [r]: side } } });
   return (
     <section>
-      <h2>Contours</h2>
+      <h2>Contour pairs</h2>
       <small className="hint">
-        Each root contour is cut with a tip contour. Holes and open lines are paired by where they sit in the outline; change a pairing here if
-        the guess is wrong. The default plan cuts in from the nearest point of the outline, around each contour, and back out.
+        Contours with the same number (and colour) on the two pickers are cut together. Holes are paired in order along the outline when both
+        profiles have the same number; otherwise by where they sit. Change a pairing here if it guessed wrong.
       </small>
       <table className="contours">
         <thead>
           <tr>
-            <th>Root</th>
-            <th>Tip</th>
-            <th>Kerf side</th>
+            <th>Pair</th>
+            <th>Root contour</th>
+            <th>Tip contour</th>
           </tr>
         </thead>
         <tbody>
           {roots.map((p, r) => {
-            const closed = p.closed !== false;
-            const pr = pairOf(r);
-            const sides: KerfSide[] = closed ? ['auto', 'outside', 'inside', 'none'] : ['auto', 'left', 'right', 'none'];
-            const chosen = job.contours.kerfSide[r] ?? 'auto';
+            const n = pairNo(r);
             return (
               <tr key={r}>
                 <td>
-                  {r + 1} <small className="hint">{r === 0 ? 'outer' : kind(closed)}</small>
+                  <span className="swatch" style={{ background: n < 0 ? 'var(--muted)' : pairColor(n, 'var(--text)') }} /> {n < 0 ? '–' : n + 1}
+                </td>
+                <td>
+                  {r + 1} <small className="hint">{r === 0 ? 'outline' : kind(p.closed !== false)}</small>
                 </td>
                 <td>
                   {r === 0 ? (
-                    <span>1</span>
+                    <span>1 (outline)</span>
                   ) : (
                     <select value={current[r]} onChange={(e) => setPair(r, Number(e.target.value))}>
                       <option value={-1}>not cut</option>
@@ -376,11 +384,45 @@ function ContoursSection(c: PageCtx) {
                     </select>
                   )}
                 </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <button disabled={!job.contours.pairs} onClick={() => patch({ contours: { ...job.contours, pairs: null, sync: {} }, plan: null })}>
+        Pair automatically
+      </button>
+    </section>
+  );
+}
+
+/** Kerf side per contour pair. Shown on Segment when there are several contours. */
+function KerfSideSection(c: PageCtx) {
+  const { job, patch, result } = c;
+  if (!result || result.pairs.length < 2) return null;
+  const setSide = (r: number, side: KerfSide) => patch({ contours: { ...job.contours, kerfSide: { ...job.contours.kerfSide, [r]: side } } });
+  return (
+    <section>
+      <h2>Kerf side</h2>
+      <small className="hint">
+        Which side of each contour the wire's kerf goes. Open contours are left or right of the direction they were drawn in; turn on the kerf layer to
+        check.
+      </small>
+      <table className="contours">
+        <tbody>
+          {result.pairs.map((pr, i) => {
+            const sides: KerfSide[] = pr.closed ? ['auto', 'outside', 'inside', 'none'] : ['auto', 'left', 'right', 'none'];
+            return (
+              <tr key={pr.root}>
                 <td>
-                  <select value={chosen} disabled={!pr} onChange={(e) => setSide(r, e.target.value as KerfSide)}>
+                  <span className="swatch" style={{ background: pairColor(i, 'var(--text)') }} /> Pair {i + 1}{' '}
+                  <small className="hint">{i === 0 ? 'outline' : kind(pr.closed)}</small>
+                </td>
+                <td>
+                  <select value={job.contours.kerfSide[pr.root] ?? 'auto'} onChange={(e) => setSide(pr.root, e.target.value as KerfSide)}>
                     {sides.map((s) => (
                       <option key={s} value={s}>
-                        {s === 'auto' && pr ? `Auto (${pr.autoKerfSide})` : SIDE_LABEL[s]}
+                        {s === 'auto' ? `Auto (${pr.autoKerfSide})` : SIDE_LABEL[s]}
                       </option>
                     ))}
                   </select>
@@ -390,10 +432,6 @@ function ContoursSection(c: PageCtx) {
           })}
         </tbody>
       </table>
-      <button disabled={!job.contours.pairs} onClick={() => patch({ contours: { ...job.contours, pairs: null, sync: {} }, plan: null })}>
-        Pair automatically
-      </button>
-      <small className="hint">Open contours are left or right of the direction they were drawn in; turn on the kerf layer to check the side.</small>
     </section>
   );
 }
@@ -404,12 +442,13 @@ export function SegmentPage(c: PageCtx) {
   const hand = !!job.sync || Object.keys(job.contours.sync).length > 0;
   return (
     <>
-      <ContoursSection {...c} />
+      <KerfSideSection {...c} />
       <section>
         <h2>Sync points</h2>
         <small className="hint">
-          Segment <b>N</b> on the root is cut together with segment <b>N</b> on the tip. On the canvas: click a profile outline to add a split or a pin
-          (the matching one is added on the other profile), drag markers to slide them, click a marker for more options.
+          Segment <b>N</b> on the root is cut together with segment <b>N</b> on the tip. On the canvas: click a profile outline to add a split (the
+          matching one is added on the other profile), drag a marker to slide it, click a marker for more options. Splits are linked: dragging one moves
+          its partner to the same relative position. Unlink one from its menu to move it on one profile only (it gets a dashed ring).
         </small>
         <small className="hint">{hand ? 'Splits are edited by hand.' : 'Splits are automatic (entity boundaries + sharp corners).'}</small>
         <button
@@ -419,14 +458,14 @@ export function SegmentPage(c: PageCtx) {
             c.setNotice(null);
           }}
         >
-          Reset splits &amp; pins to automatic
+          Reset splits to automatic
         </button>
         <NumberField
           label="Corner split angle (°)"
           value={job.cornerSplitDeg}
           min={1}
           onChange={(v) => patch({ cornerSplitDeg: v, sync: null, contours: { ...job.contours, sync: {} }, plan: null })}
-          hint="Corners sharper than this become automatic splits. Changing it resets splits, pins and the plan."
+          hint="Corners sharper than this become automatic splits. Changing it resets the splits and the plan."
         />
       </section>
       <section>

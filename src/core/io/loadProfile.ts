@@ -8,6 +8,8 @@ export interface LoadedProfile {
   profile: Profile | null;
   /** Every contour to cut: the outer one first, then the others (holes, open cuts). */
   contours: Profile[];
+  /** Entity indices making up each contour (same order as `contours`). */
+  contourEdges: number[][];
   fileUnits: Units | null;
   warnings: string[];
   /** Every entity in the file (target units), for picking on the Import page. */
@@ -22,20 +24,35 @@ export interface LoadedProfile {
 
 const toMm: Record<Units, number> = { in: 25.4, mm: 1 };
 
+/** Rotate a point CCW about the origin by `deg` (a multiple of 90, so it stays exact). */
+export function rotate90(p: Vec2, deg: number): Vec2 {
+  switch ((((Math.round(deg / 90) % 4) + 4) % 4) as 0 | 1 | 2 | 3) {
+    case 1:
+      return { x: -p.y, y: p.x };
+    case 2:
+      return { x: -p.x, y: -p.y };
+    case 3:
+      return { x: p.y, y: -p.x };
+    default:
+      return p;
+  }
+}
+
 /**
- * Parse a DXF into its contours, converted to `target` units. `selection` limits it to those
- * entity indices; null = automatic: the largest closed outline and every contour inside it.
+ * Parse a DXF into its contours, converted to `target` units and rotated by `rotation` degrees
+ * (multiples of 90, CCW) to match the cutter's axes. `selection` limits it to those entity
+ * indices; null = automatic: the largest closed outline and every contour inside it.
  */
-export function loadDxfProfile(text: string, target: Units, selection: number[] | null = null): LoadedProfile {
+export function loadDxfProfile(text: string, target: Units, selection: number[] | null = null, rotation = 0): LoadedProfile {
   const dxf = parseDxf(text);
   const warnings = [...dxf.warnings];
   const k = dxf.units && dxf.units !== target ? toMm[dxf.units] / toMm[target] : 1;
-  const sc = (p: Vec2) => (k === 1 ? p : { x: p.x * k, y: p.y * k });
+  const sc = (p: Vec2) => rotate90(k === 1 ? p : { x: p.x * k, y: p.y * k }, rotation);
   const edges = dxf.edges.map((e) => ({ ...e, pts: e.pts.map(sc) }));
   const texts = dxf.texts.map((t) => ({ ...t, at: sc(t.at), height: t.height * k }));
   if (!dxf.units) warnings.push(`The DXF does not say what units it uses; assuming ${target}.`);
   const base = { fileUnits: dxf.units, edges, texts };
-  const none = { profile: null, contours: [], used: [] };
+  const none = { profile: null, contours: [], contourEdges: [], used: [] };
   if (!edges.length) return { ...base, ...none, selected: [], warnings: [...warnings, 'No usable geometry in this DXF.'] };
 
   const selected = selection ? selection.filter((i) => i >= 0 && i < edges.length) : edges.map((_, i) => i);
@@ -59,7 +76,7 @@ export function loadDxfProfile(text: string, target: Units, selection: number[] 
   if (contours.length && !isClosed(contours[0])) warnings.push('The selection has no closed outline; the first open contour is treated as the outer one.');
   const used = ids.flat().sort((a, b) => a - b);
   // automatic: report the pick as the selection, so the picker shows what is actually cut
-  return { ...base, profile: contours[0] ?? null, contours, selected: selection ? selected : used, used, warnings };
+  return { ...base, profile: contours[0] ?? null, contours, contourEdges: ids, selected: selection ? selected : used, used, warnings };
 }
 
 function bounds(pts: Vec2[]) {

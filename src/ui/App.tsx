@@ -71,10 +71,19 @@ export function App() {
     }));
   };
 
-  const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units, job.selection.root) : null), [rootFile, machine.units, job.selection.root]);
-  const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units, job.selection.tip) : null), [tipFile, machine.units, job.selection.tip]);
+  const root = useMemo(
+    () => (rootFile ? loadDxfProfile(rootFile.text, machine.units, job.selection.root, job.rotation.root) : null),
+    [rootFile, machine.units, job.selection.root, job.rotation.root],
+  );
+  const tip = useMemo(
+    () => (tipFile ? loadDxfProfile(tipFile.text, machine.units, job.selection.tip, job.rotation.tip) : null),
+    [tipFile, machine.units, job.selection.tip, job.rotation.tip],
+  );
   /** Changing which entities make up a profile changes its splits, so sync and plan start over. */
   const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, contours: noContours(), plan: null });
+  /** Rotating a profile changes where its splits fall, so sync and plan start over too. */
+  const setRotation = (side: 'root' | 'tip', deg: number) =>
+    patch({ rotation: { ...job.rotation, [side]: ((deg % 360) + 360) % 360 }, sync: null, contours: noContours(), plan: null });
   // While a profile is being dragged the part offset is held, so it doesn't jump under the cursor.
   const [hold, setHold] = useState<Vec2 | null>(null);
   const dragStart = useRef<Vec2 | null>(null);
@@ -103,6 +112,8 @@ export function App() {
     }
   };
   const plan: CutPlan | null = result?.plan ?? null;
+  /** For each contour of a side, the pair it is cut in (-1 = not cut). */
+  const pairOf = (side: 'root' | 'tip', n: number) => Array.from({ length: n }, (_, c) => result?.pairs.findIndex((p) => p[side] === c) ?? (c === 0 ? 0 : -1));
 
   // ---- pages
   const importWarnings = [
@@ -365,12 +376,30 @@ export function App() {
             ) : page === 'import' ? (
               <div className="pickers">
                 {root ? (
-                  <DxfPicker label={`Root: ${rootFile?.name}`} color="var(--root)" loaded={root} selection={job.selection.root} onChange={(s) => setSelection('root', s)} />
+                  <DxfPicker
+                    label={`Root: ${rootFile?.name}`}
+                    color="var(--root)"
+                    loaded={root}
+                    selection={job.selection.root}
+                    onChange={(s) => setSelection('root', s)}
+                    pairOf={pairOf('root', root.contours.length)}
+                    rotation={job.rotation.root}
+                    onRotate={(d) => setRotation('root', d)}
+                  />
                 ) : (
                   <div className="empty-panel">Open a root DXF to choose its geometry.</div>
                 )}
                 {tip ? (
-                  <DxfPicker label={`Tip: ${tipFile?.name}`} color="var(--tip)" loaded={tip} selection={job.selection.tip} onChange={(s) => setSelection('tip', s)} />
+                  <DxfPicker
+                    label={`Tip: ${tipFile?.name}`}
+                    color="var(--tip)"
+                    loaded={tip}
+                    selection={job.selection.tip}
+                    onChange={(s) => setSelection('tip', s)}
+                    pairOf={pairOf('tip', tip.contours.length)}
+                    rotation={job.rotation.tip}
+                    onRotate={(d) => setRotation('tip', d)}
+                  />
                 ) : (
                   <div className="empty-panel">Open a tip DXF to choose its geometry.</div>
                 )}

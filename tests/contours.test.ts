@@ -5,7 +5,7 @@ import { generateCut } from '../src/core/cut/pipeline';
 import { arcLoop } from '../src/core/geom/arc';
 import type { Profile } from '../src/core/geom/profile';
 import type { Vec2 } from '../src/core/geom/vec';
-import { loadDxfProfile } from '../src/core/io/loadProfile';
+import { loadDxfProfile, rotate90 } from '../src/core/io/loadProfile';
 import { segSplits } from '../src/core/plan/model';
 import { defaultJob, materials } from '../src/core/presets';
 import { addSplit, moveSplit } from '../src/core/sync/edit';
@@ -214,5 +214,42 @@ describe('open contours', () => {
     const dy = (p: typeof left) => p.kerfStations[1].r.y - p.stations[1].r.y;
     expect(Math.sign(dy(left))).toBe(-Math.sign(dy(right)));
     expect(Math.abs(dy(left))).toBeCloseTo(0.0998 / 2, 6);
+  });
+});
+
+describe('pairing holes in order along the outline', () => {
+  const rect = (x: number, y: number, w: number, h: number): Profile => ({
+    pts: [
+      { x, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h },
+    ],
+    breaks: [0, 1, 2, 3],
+  });
+  // root holes at 30% and 45% chord; on the swept tip they sit at 50% and 65%
+  const rootSet = [rect(0, 0, 10, 1), rect(3, 0.4, 0.2, 0.2), rect(4.5, 0.4, 0.2, 0.2)];
+  const tipSet = [rect(0, 0, 10, 1), rect(6.5, 0.4, 0.2, 0.2), rect(5, 0.4, 0.2, 0.2)];
+
+  it('keeps the order (front hole with front hole) where nearest position would cross them over', () => {
+    expect(autoPairs(rootSet, tipSet)).toEqual([0, 2, 1]);
+  });
+
+  it('works on profiles drawn chord-vertical too', () => {
+    const turn = (p: Profile): Profile => ({ ...p, pts: p.pts.map((q) => rotate90(q, 90)) });
+    expect(autoPairs(rootSet.map(turn), tipSet.map(turn))).toEqual([0, 2, 1]);
+  });
+});
+
+describe('rotating on import', () => {
+  it('turns the geometry by 90° steps, exactly', () => {
+    expect(rotate90({ x: 2, y: 1 }, 90)).toEqual({ x: -1, y: 2 });
+    expect(rotate90({ x: 2, y: 1 }, -90)).toEqual({ x: 1, y: -2 });
+    expect(rotate90({ x: 2, y: 1 }, 540)).toEqual({ x: -2, y: -1 });
+    const flat = loadDxfProfile(fx('vtail-root.dxf'), 'in');
+    const upright = loadDxfProfile(fx('vtail-root.dxf'), 'in', null, 90);
+    const span = (p: Profile, k: 'x' | 'y') => Math.max(...p.pts.map((q) => q[k])) - Math.min(...p.pts.map((q) => q[k]));
+    expect(span(upright.profile!, 'y')).toBeCloseTo(span(flat.profile!, 'x'), 9);
+    expect(upright.contourEdges.flat().sort()).toEqual(flat.contourEdges.flat().sort());
   });
 });
