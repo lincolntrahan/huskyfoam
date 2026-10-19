@@ -5,6 +5,7 @@ import type { CutPlan } from '../core/plan/model';
 import { loopPlan, type Rect } from '../core/plan/templates';
 import type { JobSettings, MachinePreset, MaterialPreset, SegmentOverride } from '../core/types';
 import type { KerfSide } from '../core/cut/contours';
+import { defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel } from './PlanPanel';
 import { download } from './PresetEditor';
@@ -14,6 +15,8 @@ import type { PresetOrigin } from './usePresets';
 /** Everything the pages read and change; owned by App. */
 export interface PageCtx {
   job: JobSettings;
+  /** The job with its layout resolved (profile planes, part offset, block). */
+  placed: JobSettings;
   patch: (p: Partial<JobSettings>) => void;
   result: CutResult | null;
   plan: CutPlan | null;
@@ -151,10 +154,59 @@ export function ImportPage(c: PageCtx) {
   );
 }
 
-// ---------------------------------------------------------------- 2. Setup
+// ---------------------------------------------------------------- 2. Arrange profiles
+export function TransformPage(c: PageCtx) {
+  const { job, patch } = c;
+  const u = c.machine.units;
+  const distance = job.profile.distance ?? job.span;
+  return (
+    <>
+      <section>
+        <h2>Profile spacing ({u})</h2>
+        <small className="hint">
+          Arrange the root and tip relative to each other here. Where the part ends up on the machine follows from <i>Place in Machine</i>: it sits the
+          floor offset above Y = 0 and as close to X = 0 as the carriages allow.
+        </small>
+        <NumberField
+          label="Distance between profiles"
+          value={distance}
+          min={0}
+          onChange={(v) => v > 0 && patch({ profile: { distance: v, inset: null } })}
+          hint="Along the wire, root plane to tip plane (the panel span)"
+        />
+        <small className="hint">Drag a profile on the canvas to move it relative to the other one (it updates Move X / Y below).</small>
+      </section>
+      <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- 3. Place in machine
+const ALONG_WIRE = [
+  { value: 'center', label: 'Profiles centred' },
+  { value: 'left', label: 'Left profile on the left face' },
+  { value: 'right', label: 'Right profile on the right face' },
+] as const;
+const ALONG_CHORD = [
+  { value: 'center', label: 'Profiles centred' },
+  { value: 'left', label: 'Profiles against the −X side' },
+  { value: 'right', label: 'Profiles against the +X side' },
+] as const;
+const VERTICAL = [
+  { value: 'middle', label: 'Profiles in the middle' },
+  { value: 'bottom', label: 'Profiles on the bottom face' },
+  { value: 'top', label: 'Profiles against the top face' },
+] as const;
+
 export function SetupPage(c: PageCtx) {
-  const { job, patch, machine, material } = c;
+  const { job, patch, machine, placed } = c;
   const u = machine.units;
+  const L = job.layout ?? defaultLayout(machine, job.profile.distance ?? job.span);
+  const setL = (p: Partial<Layout>) => patch({ layout: { ...L, ...p } });
+  const distance = job.profile.distance ?? job.span;
+  const outlines = c.result?.pairs.flatMap((p) => [...p.pts.root, ...p.pts.tip]) ?? [];
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const blockSet = placed.block.w > 0 && placed.block.h > 0;
   return (
     <>
       <section>
@@ -173,7 +225,7 @@ export function SetupPage(c: PageCtx) {
         <label className="field">
           <span>Material</span>
           <span className="pick">
-            <select value={material.id} onChange={(e) => c.applyMaterial(c.materials.find((m) => m.id === e.target.value)!)}>
+            <select value={c.material.id} onChange={(e) => c.applyMaterial(c.materials.find((m) => m.id === e.target.value)!)}>
               {presetOptions(c.materials, (id) => c.origin('material', id))}
             </select>
             <button onClick={() => c.openEditor('material')} title="Edit or copy this material (kerf table, kerf test, dwell, wire power)">
@@ -184,19 +236,18 @@ export function SetupPage(c: PageCtx) {
         <small className="hint">{materialSummary(job, u)}</small>
       </section>
 
-
       <section>
-        <h2>Block on the machine ({u})</h2>
+        <h2>Profiles on the machine ({u})</h2>
         <small className="hint">
-          Carriages are {machine.carriageSpacing} {u} apart. Measure the gap from either carriage to the block; the other side follows.
+          Carriages are {machine.carriageSpacing} {u} apart and the profiles {r3(distance)} {u} apart. Measure from either carriage; the other side
+          follows.
         </small>
-        <NumberField label="Block width" value={job.span} min={0} onChange={(v) => patch({ span: v })} hint="Left face to right face, along the wire" />
         <div className="dual">
-          <NumberField label="Left carriage to block" value={job.rootFaceFromLeft} onChange={(v) => patch({ rootFaceFromLeft: v })} />
+          <NumberField label="Left carriage to left profile" value={round6(L.profileFromLeft)} onChange={(v) => setL({ profileFromLeft: v })} />
           <NumberField
-            label="Right carriage to block"
-            value={round6(machine.carriageSpacing - job.span - job.rootFaceFromLeft)}
-            onChange={(v) => patch({ rootFaceFromLeft: machine.carriageSpacing - job.span - v })}
+            label="Right carriage to right profile"
+            value={round6(machine.carriageSpacing - distance - L.profileFromLeft)}
+            onChange={(v) => setL({ profileFromLeft: machine.carriageSpacing - distance - v })}
           />
         </div>
         <SelectField
@@ -212,60 +263,37 @@ export function SetupPage(c: PageCtx) {
           <button title="Cut the opposite-hand panel from the same files: swaps which carriage gets the root" onClick={() => patch({ rootSide: job.rootSide === 'left' ? 'right' : 'left' })}>
             Mirror L/R
           </button>
-          <button onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}>Center block</button>
+          <button onClick={() => setL({ profileFromLeft: (machine.carriageSpacing - distance) / 2 })}>Center between carriages</button>
         </div>
-        <NumberField label="Part offset X" value={job.offset.x} onChange={(v) => patch({ offset: { ...job.offset, x: v } })} hint="Where the profiles sit in machine X/Y" />
-        <NumberField label="Part offset Y" value={job.offset.y} onChange={(v) => patch({ offset: { ...job.offset, y: v } })} />
-      </section>
-
-      <section>
-        <h2>Foam block outline ({u})</h2>
-        <NumberField label="Left edge X" value={job.block.x} onChange={(v) => patch({ block: { ...job.block, x: v } })} />
-        <NumberField label="Bottom Y" value={job.block.y} onChange={(v) => patch({ block: { ...job.block, y: v } })} />
-        <NumberField label="Width" value={job.block.w} min={0} onChange={(v) => patch({ block: { ...job.block, w: v } })} />
-        <NumberField label="Height" value={job.block.h} min={0} onChange={(v) => patch({ block: { ...job.block, h: v } })} hint="0 = no block; jog checks are off" />
-        <button onClick={() => patch({ block: c.fitBlock() })}>Fit block to part</button>
-      </section>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------- 3. Transform
-export function TransformPage(c: PageCtx) {
-  const { job, patch } = c;
-  const u = c.machine.units;
-  const distance = job.profile.distance ?? job.span;
-  const inset = job.profile.inset ?? (job.span - distance) / 2;
-  return (
-    <>
-      <section>
-        <h2>Profile placement ({u})</h2>
+        <NumberField label="Height above floor" value={L.floor} onChange={(v) => setL({ floor: v })} hint="Lowest profile point above Y = 0" />
         <small className="hint">
-          Where the root and tip profiles sit along the wire, inside the {job.span} {u} block. By default the profiles are the block's faces.
+          The part is pushed toward X = {machine.travel.x[0]} until a carriage would pass it: part offset ({r3(placed.offset.x)}, {r3(placed.offset.y)}).
         </small>
-        <NumberField
-          label="Profile distance"
-          value={distance}
-          min={0}
-          onChange={(v) => patch({ profile: { ...job.profile, distance: v } })}
-          hint="Distance between the root and tip profiles (the panel span)"
-        />
-        <NumberField
-          label="Root profile inset"
-          value={inset}
-          onChange={(v) => patch({ profile: { ...job.profile, inset: v } })}
-          hint="From the block's root face to the root profile"
-        />
-        <div className="row-buttons">
-          <button disabled={job.profile.inset === null} onClick={() => patch({ profile: { ...job.profile, inset: null } })} title="Same gap on both sides">
-            Center in block
-          </button>
-          <button disabled={job.profile.distance === null && job.profile.inset === null} onClick={() => patch({ profile: { distance: null, inset: null } })}>
-            Profiles on block faces
-          </button>
-        </div>
       </section>
-      <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })} />
+
+      <section>
+        <h2>Foam block ({u})</h2>
+        <NumberField label="Width (X, along the chord)" value={L.block.w} min={0} onChange={(v) => setL({ block: { ...L.block, w: v } })} />
+        <NumberField label="Height (Y)" value={L.block.h} min={0} onChange={(v) => setL({ block: { ...L.block, h: v } })} />
+        <NumberField
+          label="Length (along the wire)"
+          value={L.block.len}
+          min={0}
+          onChange={(v) => setL({ block: { ...L.block, len: v } })}
+          hint="0 = the profile distance"
+        />
+        <SelectField label="Along the wire" value={L.alongWire} options={[...ALONG_WIRE]} onChange={(v) => setL({ alongWire: v as AlignH })} />
+        <SelectField label="Along the chord" value={L.alongChord} options={[...ALONG_CHORD]} onChange={(v) => setL({ alongChord: v as AlignH })} />
+        <SelectField label="Vertical" value={L.vertical} options={[...VERTICAL]} onChange={(v) => setL({ vertical: v as AlignV })} />
+        <button disabled={!outlines.length} onClick={() => setL({ block: fitBlockSize(placed, outlines, u === 'mm' ? 5 : 0.2) })}>
+          Fit block to profiles
+        </button>
+        <small className="hint">
+          {blockSet
+            ? `Block X ${r3(placed.block.x)} to ${r3(placed.block.x + placed.block.w)}, Y ${r3(placed.block.y)} to ${r3(placed.block.y + placed.block.h)}; faces ${r3(placed.rootFaceFromLeft)} and ${r3(placed.rootFaceFromLeft + placed.span)} from the left carriage.`
+            : 'Width or height 0 = no block: jog-through-foam checks are off.'}
+        </small>
+      </section>
     </>
   );
 }
@@ -493,7 +521,7 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
         </div>
       ) : (
         <div className="callout warn">
-          No wire power is set for “{c.material.name}”. Add it in Define Setup → Material → Edit…, or set the power by hand before cutting.
+          No wire power is set for “{c.material.name}”. Add it in Place in Machine → Material → Edit…, or set the power by hand before cutting.
         </div>
       )}
       <section>

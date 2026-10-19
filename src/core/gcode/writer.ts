@@ -28,7 +28,9 @@ export interface WriteOptions {
 
 function axisWords(p: CarriagePos, m: MachinePreset): string {
   const vals = { leftH: p.left.x, leftV: p.left.y, rightH: p.right.x, rightV: p.right.y };
-  return m.axisOrder.map((k) => `${m.axes[k]}${vals[k].toFixed(m.decimals)}`).join('');
+  // never print "-0.000000" for a value that rounds to zero
+  const fmt = (v: number) => v.toFixed(m.decimals).replace(/^-(0\.?0*)$/, '$1');
+  return m.axisOrder.map((k) => `${m.axes[k]}${fmt(vals[k])}`).join('');
 }
 
 /** Shortest decimal form (no trailing zeros), for dwell times and watts. */

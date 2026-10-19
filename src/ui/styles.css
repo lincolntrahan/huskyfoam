@@ -229,6 +229,9 @@ button.wide { width: 100%; margin-top: 4px; }
 .hint3d { position: absolute; left: 8px; bottom: 54px; color: var(--muted); font-size: 11px; pointer-events: none; }
 .hint3d.low { bottom: 8px; }
 
+.grab { cursor: grab; }
+.grab:active { cursor: grabbing; }
+
 /* contour pairing table on the Segment page */
 table.contours { width: 100%; border-collapse: collapse; margin: 6px 0; }
 table.contours th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 2px 4px; }

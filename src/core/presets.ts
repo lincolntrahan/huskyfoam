@@ -1,3 +1,4 @@
+import { defaultLayout } from './cut/placement';
 import { defaultTransforms } from './cut/transform';
 import type { JobSettings, MachinePreset, MaterialPreset } from './types';
 
@@ -15,6 +16,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     rootFaceFromLeft: (machine.carriageSpacing - span) / 2,
     span,
     rootSide: 'left',
+    layout: defaultLayout(machine, span),
     offset: { x: 0, y: 0 },
     selection: { root: null, tip: null },
     profile: { distance: null, inset: null },

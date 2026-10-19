@@ -1,3 +1,5 @@
+import { profilePlanes } from '../cut/pipeline';
+import { defaultLayout } from '../cut/placement';
 import { defaultTransforms } from '../cut/transform';
 import { defaultJob } from '../presets';
 import type { JobSettings, MachinePreset, MaterialPreset } from '../types';
@@ -57,6 +59,16 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     plan: job.plan ?? null,
   };
   delete (out as unknown as Record<string, unknown>).segmentKerf;
+  if (job.layout === undefined) {
+    // saved before automatic placement: keep the profiles where they were along the wire and the block size
+    const planes = profilePlanes(out);
+    out.layout = {
+      ...defaultLayout(machine, planes.distance),
+      profileFromLeft: Math.min(planes.zr, planes.zt),
+      block: { w: out.block.w, h: out.block.h, len: out.span },
+    };
+    out.profile = { distance: planes.distance, inset: null };
+  }
   return out;
 }
 

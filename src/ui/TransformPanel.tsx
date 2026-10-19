@@ -8,8 +8,11 @@ interface Props {
 }
 
 type Side = 'root' | 'tip';
-/** Fields that "link root & tip" keeps equal. Twist is always per profile. */
-const LINKED: (keyof ProfileTransform)[] = ['scale', 'move', 'pivot', 'pivotPoint'];
+/**
+ * Fields that "link root & tip" keeps equal. Twist and move are always per profile (moving both
+ * together changes nothing: the part is placed on the machine automatically).
+ */
+const LINKED: (keyof ProfileTransform)[] = ['scale', 'pivot', 'pivotPoint'];
 
 export function TransformPanel({ value: t, onChange, units }: Props) {
   const set = (side: Side, patch: Partial<ProfileTransform>) => {
@@ -90,7 +93,7 @@ export function TransformPanel({ value: t, onChange, units }: Props) {
             onChange({ ...t, link, tip });
           }}
         />
-        Link root &amp; tip (scale, move, pivot)
+        Link root &amp; tip (scale, pivot)
       </label>
       <div className="row-buttons">
         <label className="check" title="Mirror both profiles left-right about their pivots (cut TE-first)">
