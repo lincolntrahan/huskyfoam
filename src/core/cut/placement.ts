@@ -10,7 +10,8 @@ export type AlignV = 'middle' | 'bottom' | 'top';
  * How the part sits on the machine (SPEC M2d). The user arranges the profiles relative to
  * each other (transforms, profile distance); everything else follows from these:
  * - along the wire, the left profile is `profileFromLeft` from the left carriage;
- * - vertically, the lowest profile point is `floor` above Y = 0;
+ * - vertically, the lowest profile point is `floor` above Y = 0, or higher if a carriage would
+ *   otherwise go below its travel limit (a steep slope between the profiles);
  * - in X, the part is pushed toward the origin until a carriage would go past the travel limit;
  * - the block is placed around the profiles by the three alignments.
  */
@@ -31,7 +32,7 @@ export interface Layout {
 
 export const defaultLayout = (machine: MachinePreset, distance: number): Layout => ({
   profileFromLeft: (machine.carriageSpacing - distance) / 2,
-  floor: machine.units === 'mm' ? 10 : 0.5,
+  floor: machine.units === 'mm' ? 6 : 0.25,
   block: { w: 0, h: 0, len: 0 },
   alongWire: 'center',
   alongChord: 'center',
@@ -64,14 +65,29 @@ function bounds(pts: Vec2[]) {
   return { x0, y0, x1, y1 };
 }
 
+export interface Placement {
+  /** The job with profile planes, part offset and block worked out. */
+  job: JobSettings;
+  /**
+   * Set when the floor offset was too low: a carriage would have gone below its Y travel limit,
+   * so the profiles were raised. The lowest profile point's actual height above Y = 0.
+   */
+  raisedTo: number | null;
+}
+
 /**
  * Resolve a job's layout into the positions the cut uses: profile planes, the part offset and
  * the block rectangle. Jobs without a layout (older projects) are returned unchanged.
  * `hold`: keep this part offset instead of fitting it (while the user drags a profile).
  */
 export function placeJob(job: JobSettings, root: Profile[], tip: Profile[], machine: MachinePreset, hold?: Vec2 | null): JobSettings {
+  return placeLayout(job, root, tip, machine, hold).job;
+}
+
+export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], machine: MachinePreset, hold?: Vec2 | null): Placement {
+  const done = (j: JobSettings, raisedTo: number | null = null): Placement => ({ job: j, raisedTo });
   const layout = job.layout;
-  if (!layout) return job;
+  if (!layout) return done(job);
   const w = wireLayout(job, layout);
   const base: JobSettings = {
     ...job,
@@ -81,27 +97,37 @@ export function placeJob(job: JobSettings, root: Profile[], tip: Profile[], mach
     offset: { x: 0, y: 0 },
     block: { x: 0, y: 0, w: 0, h: 0 },
   };
-  if (!root.length || !tip.length) return base;
+  if (!root.length || !tip.length) return done(base);
 
   // Lay the part out at no offset, then shift it (the cut is translation-invariant).
   const first = generateCut(root, tip, base, machine);
   const outlines = first.pairs.length ? first.pairs.flatMap((p) => [...p.pts.root, ...p.pts.tip]) : [...first.profilePts.root, ...first.profilePts.tip];
-  if (!outlines.length) return base;
+  if (!outlines.length) return done(base);
   const b0 = bounds(outlines);
 
   let offset = hold ?? null;
+  let raisedTo: number | null = null;
   if (!offset) {
-    // the closest any carriage comes to -X along the kerfed cut, before shifting
+    // the closest any carriage comes to -X, and how low it goes, along the kerfed cut, before shifting
     const project = projector(base, machine);
     let minX = Infinity;
+    let minY = Infinity;
     for (const pr of first.pairs) {
       for (const s of pr.kerfStations) {
         const c = project(s.r, s.t);
         minX = Math.min(minX, c.left.x, c.right.x);
+        minY = Math.min(minY, c.left.y, c.right.y);
       }
     }
     if (!Number.isFinite(minX)) minX = b0.x0; // no cut yet (e.g. unmatched splits): use the outlines
-    offset = { x: machine.travel.x[0] - minX, y: layout.floor - b0.y0 };
+    let dy = layout.floor - b0.y0;
+    // never lower the part so far that a carriage passes its bottom travel limit
+    const lowest = machine.travel.y[0] - minY;
+    if (Number.isFinite(minY) && dy < lowest - 1e-9) {
+      dy = lowest;
+      raisedTo = b0.y0 + dy;
+    }
+    offset = { x: machine.travel.x[0] - minX, y: dy };
   }
 
   const b = { x0: b0.x0 + offset.x, x1: b0.x1 + offset.x, y0: b0.y0 + offset.y, y1: b0.y1 + offset.y };
@@ -115,7 +141,7 @@ export function placeJob(job: JobSettings, root: Profile[], tip: Profile[], mach
           h: bh,
         }
       : base.block;
-  return { ...base, offset, block };
+  return done({ ...base, offset, block }, raisedTo);
 }
 
 /** The block size that just holds the profiles, plus `margin` all round (and the profile distance along the wire). */

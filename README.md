@@ -49,7 +49,7 @@ A profile can have more than one contour: the closed outer outline plus holes (s
 You only arrange the profiles relative to each other (on *Arrange Profiles*). Where the part sits on the machine is worked out from a few settings:
 
 - **Along the wire**: measure from **either** carriage to its profile. Typing the left gap fills in the right one (right = carriage spacing − profile distance − left), and the other way round. **Root profile on** picks which carriage cuts the root DXF.
-- **Height above floor**: the lowest point of either profile sits this far above Y = 0.
+- **Height above floor**: the lowest point of either profile sits this far above Y = 0. The default is 0.25 in. On a part with a steep slope between the profiles the carriages go lower than the profiles; if they would pass the machine's Y travel limit, the profiles are raised just enough to keep them in, and the page says how high they ended up.
 - **X**: the part is pushed toward X = 0 as far as it can go without any carriage move going past the machine's travel limit.
 - **Foam block**: its width (along the chord), height and length (along the wire). Three dropdowns place it around the profiles:
   - along the wire: profiles centred, or the left/right profile on that block face;
