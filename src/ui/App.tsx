@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
-import { defaultLayout, placeJob } from '../core/cut/placement';
+import { defaultLayout, placeLayout } from '../core/cut/placement';
 import type { Profile } from '../core/geom/profile';
 import type { Vec2 } from '../core/geom/vec';
 import { loadDxfProfile } from '../core/io/loadProfile';
@@ -79,7 +79,8 @@ export function App() {
   const [hold, setHold] = useState<Vec2 | null>(null);
   const dragStart = useRef<Vec2 | null>(null);
   /** The job with its layout resolved: profile planes, part offset and block worked out. */
-  const placed = useMemo(() => placeJob(job, root?.contours ?? [], tip?.contours ?? [], machine, hold), [root, tip, job, machine, hold]);
+  const placement = useMemo(() => placeLayout(job, root?.contours ?? [], tip?.contours ?? [], machine, hold), [root, tip, job, machine, hold]);
+  const placed = placement.job;
   const result = useMemo(
     () => (root?.contours.length && tip?.contours.length ? generateCut(root.contours, tip.contours, placed, machine) : null),
     [root, tip, placed, machine],
@@ -236,6 +237,7 @@ export function App() {
   const ctx: PageCtx = {
     job,
     placed,
+    raisedTo: placement.raisedTo,
     patch,
     result,
     plan,

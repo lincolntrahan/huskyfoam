@@ -405,6 +405,7 @@ Libraries:
 - `job.layout`: left carriage to left profile plane (dual left/right entry), floor offset, block size (w, h, len) and three alignments (along the wire, along the chord, vertical).
 - `placeJob` resolves it before cutting: profile planes from the layout; part offset Y so the lowest profile point is the floor offset above Y = 0; part offset X so the closest carriage position on the kerfed cut is at the travel minimum; block rectangle and ends from the alignments. A first cut at zero offset supplies the geometry (the cut is translation-invariant). While a profile is dragged the offset is held.
 - Shop machine home is (0, 0). Older projects get a layout that keeps their profile planes and block size.
+- Floor offset defaults to 0.25 in (6 mm). If the lowest carriage position on the kerfed cut would fall below the Y travel minimum, the part is raised to put it exactly there instead, and Place in Machine shows the resulting profile height (PR #12).
 
 **M3 — Visualization & polish**
 - 3D view with playback

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { generateCut, profilePlanes } from '../src/core/cut/pipeline';
-import { defaultLayout, placeJob } from '../src/core/cut/placement';
+import { defaultLayout, placeJob, placeLayout } from '../src/core/cut/placement';
 import { loadDxfProfile } from '../src/core/io/loadProfile';
 import { normalizeJob } from '../src/core/io/project';
 import { defaultJob, materials } from '../src/core/presets';
@@ -122,5 +122,30 @@ describe('older projects', () => {
     expect(j.layout!.profileFromLeft).toBeCloseTo(11.965, 9);
     expect(j.layout!.block).toEqual({ w: 13, h: 1.4, len: 12.07 });
     expect(profilePlanes(placeJob(j, root, tip, testMachine)).zr).toBeCloseTo(11.965, 9);
+  });
+});
+
+describe('carriages and the floor', () => {
+  it('defaults to 0.25 in above the floor', () => {
+    expect(defaultLayout(machine, 12).floor).toBe(0.25);
+  });
+
+  it('leaves a gentle part at the floor offset', () => {
+    expect(placeLayout(job({ floor: 0.25 }), root, tip, machine).raisedTo).toBeNull();
+  });
+
+  it('raises a steep part just enough to keep the lower carriage in travel', () => {
+    const steep = job({ floor: 0.25 });
+    steep.transforms.tip.move = { x: 0, y: 3 }; // tip well above the root: the root-side carriage dips
+    const p = placeLayout(steep, root, tip, machine);
+    expect(p.raisedTo).not.toBeNull();
+    expect(p.raisedTo!).toBeGreaterThan(0.25);
+    const res = generateCut(root, tip, p.job, machine);
+    const ys = [...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y);
+    expect(Math.min(...ys)).toBeCloseTo(p.raisedTo!, 9);
+    // the cut's lowest carriage point sits on the travel limit; nothing goes below it
+    const carY = res.moves.filter((m) => !m.lead).flatMap((m) => [m.left.y, m.right.y]);
+    expect(Math.min(...carY)).toBeCloseTo(machine.travel.y[0], 9);
+    expect(res.warnings.map((w) => w.message).join(' ')).not.toMatch(/travel limits/);
   });
 });

@@ -17,6 +17,8 @@ export interface PageCtx {
   job: JobSettings;
   /** The job with its layout resolved (profile planes, part offset, block). */
   placed: JobSettings;
+  /** Set when the profiles had to sit higher than the floor offset to keep the carriages in travel. */
+  raisedTo: number | null;
   patch: (p: Partial<JobSettings>) => void;
   result: CutResult | null;
   plan: CutPlan | null;
@@ -266,6 +268,16 @@ export function SetupPage(c: PageCtx) {
           <button onClick={() => setL({ profileFromLeft: (machine.carriageSpacing - distance) / 2 })}>Center between carriages</button>
         </div>
         <NumberField label="Height above floor" value={L.floor} onChange={(v) => setL({ floor: v })} hint="Lowest profile point above Y = 0" />
+        {c.raisedTo !== null && (
+          <div className="callout warn">
+            The slope between the profiles takes the lower carriage further down than the profiles. At {L.floor} {u} it would go below the machine's
+            Y travel ({machine.travel.y[0]} {u}), so the profiles are raised to the lowest height that keeps it in travel:{' '}
+            <b>
+              {r3(c.raisedTo)} {u}
+            </b>{' '}
+            above the floor.
+          </div>
+        )}
         <small className="hint">
           The part is pushed toward X = {machine.travel.x[0]} until a carriage would pass it: part offset ({r3(placed.offset.x)}, {r3(placed.offset.y)}).
         </small>
