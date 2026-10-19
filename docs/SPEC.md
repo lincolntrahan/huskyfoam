@@ -99,10 +99,7 @@ DXF content (SolidWorks export): per profile, 2 cubic NURBS `SPLINE`s (upper/low
 - The output is G93 inverse-time (`F = 1/t`) by default, or G94 units/min (`F` = speed of the faster carriage) if the machine is set that way.
 
 ### 4.7 Entry / exit
-- The loop starts at the chosen split point.
-- Lead-in from home goes through an editable list of **waypoints** (e.g. "straight down to block-top + clearance, then horizontal to the start"). This avoids diagonal plunges through the foam.
-- Lead-out goes through waypoints back to home (defaults to the reverse of the lead-in).
-- Lead-in and lead-out moves are cut at cut speed, or rapid when they are flagged as outside the block.
+Superseded by the **cut plan** (§4.10). Lead-in and lead-out are just the plan's first and last inserted lines. M1 ships a simpler version: a list of straight-wire waypoints that runs home → waypoints → loop start, and back the same way.
 
 ### 4.8 Preview & verification
 - **2D**: root and tip overlaid (different colors), with segment/pin markers, wire lines, the kerf-offset path, the carriage-projected paths (toggle), and the foam block outline.
@@ -123,8 +120,59 @@ DXF content (SolidWorks export): per profile, 2 cubic NURBS `SPLINE`s (upper/low
 - **Machine editor** and **Material editor**: edits are saved as local presets in browser storage. An "Export for repo" button downloads the JSON to commit through a PR so the whole team gets it.
 - Each project records the preset IDs it used plus a snapshot of their values, so an old project still reproduces the same G-code even after presets change.
 
-### 4.10 Projects
-- `.hfoam.json` holds the schema version, the raw profile geometry (embedded, not linked), splits, pins, transforms, kerf/speed/sampling settings, block placement, lead-in/out, and the preset snapshots.
+### 4.10 Cut plan: run-outs, jogs and run-ins
+The wire doesn't have to go around the profile in one loop. The **cut plan** is an ordered list of **steps** from home back to home. Use cases:
+- **LE→TE twice**: cut the upper surface LE→TE, run out aft, jog over the block back to the front, run in, then cut the lower surface LE→TE. Both surfaces are cut in the same direction, with no wrap around the LE.
+- **Out-and-back**: at a thin trailing edge or any pointed feature, run out past the point and come straight back in along the same line, so the wire never has to turn the sharp corner inside the foam.
+
+**Steps**
+- **Segment step**: one matched root/tip segment pair (§4.2), traversed **forward or reversed**. Segments can be reordered or skipped.
+- **Line step**: a straight line the user inserts, marked **cut** or **jog**.
+  - *Cut* lines run at cut speed (timed at the faster face, like profile segments). Use them for run-outs and run-ins through foam.
+  - *Jog* lines run at the machine's **jog speed** as coordinated `G1` moves, not `G0`, so the carriages stay in sync. Use them for moves through air. Jogs are still subject to the carriage speed cap.
+
+**Points.** Line steps connect **plan points**, which are shared between consecutive steps so dragging one moves both lines:
+- *Split point*: attached to matched split *k*. On each face it resolves to that face's **kerf-offset** point (see Kerf below).
+- *Free point*: a single XY used on both faces, i.e. a straight wire. This is the default for anything off the profile.
+- *Unlocked free point*: separate root and tip XY, for when a run-out has to follow the taper. Toggle it per point.
+- *Home*: the machine home. The plan always starts and ends there.
+
+**Kerf.** Inserted lines are **not** offset. They attach to the kerf-offset profile, so the part is still cut to size.
+- Kerf is computed once on the full closed loop (as in M1). Each segment step then takes its slice of the offset loop.
+- A convex-corner arc between segments *k* and *k+1* is included only when the plan cuts *k* then *k+1* consecutively (or the reverse).
+- Otherwise the segment ends at its own side of the arc, and a line attached to that split attaches there.
+
+**Continuity.** Each step must start where the previous one ended.
+- Any gap is shown on the canvas and in the step list, and **blocks export**.
+- One-click fixes: **bridge with jog** or **bridge with cut**.
+- Nothing is ever bridged silently.
+
+**Foam block.** The job gets a block rectangle (X, Y, width, height; the same on both faces), drawn on the canvas. Checks:
+- A **jog that passes through the block** on either face. It would cut foam at jog speed.
+- A cut line whose free end sits inside the block. The wire would stop in the foam.
+- **Uncut segments**: a segment the plan never cuts.
+- **Repeated segments**: a segment cut twice.
+- The usual travel-limit and speed-cap checks (§4.8), applied to jogs too.
+
+**Templates** (one click; they replace the current plan after confirming):
+- **Loop**: home → run-in → every segment forward from the loop start → back to the start → home. This is exactly the M1 behaviour, and it's the default.
+- **LE→TE top & bottom**: guesses the LE and TE splits (min/max X on the root; both can be moved), then:
+  - run in from in front of the block to the LE
+  - cut the upper segments LE→TE (reversed traversal)
+  - run out aft of the block
+  - jog up over the block (top + clearance) and forward
+  - run in to the LE
+  - cut the lower segments LE→TE
+  - run out, then jog home
+- **Out-and-back at a split**: inserts *split → free point → split* (both cut) at the selected split. The free point sits along the outward corner bisector at a typed distance (default: just past the block edge).
+
+**Editing (canvas + step list)**
+- *Canvas*: click a split marker to get **Run out from here / Run in to here / Out-and-back here**. Click empty space to add the next free point of the line being drawn. Drag free points to move them (Shift-drag to unlock root/tip). Click a line to toggle cut/jog, insert a point on it, or delete it.
+- *Drawing style*: cut lines solid, jogs dashed, both with direction arrows. Steps are numbered in order.
+- *Step list* (sidebar): every step in order, with its type, endpoints and length. Per step you can set **cut/jog**, **reverse** (segment steps), **skip/delete** and drag to **reorder**. Gap rows appear in red with the bridge buttons.
+
+### 4.11 Projects
+- `.hfoam.json` holds the schema version, the raw profile geometry (embedded, not linked), splits, pins, transforms, kerf/speed/sampling settings, block placement and rectangle, the cut plan, and the preset snapshots.
 - Save/Open via browser file dialogs.
 
 ---
@@ -140,7 +188,7 @@ interface MachinePreset {
   carriageSpacing: number;              // distance between left & right carriage planes
   travel: { x: [number, number]; y: [number, number] };  // per carriage
   maxSpeed: number;                     // per-carriage cap, units/min
-  rapidSpeed: number;
+  jogSpeed: number;                     // coordinated G1 speed for jog lines (faster carriage)
   maxWireAngleDeg?: number;
   home: { left: Vec2; right: Vec2 };
   axes: { leftH: string; leftV: string; rightH: string; rightV: string }; // 'X','Y','A','Z'
@@ -169,8 +217,26 @@ interface Job {
   kerf: { mode: 'fixed' | 'auto'; root: number; tip: number };
   sampling: { mode: 'adaptive' | 'uniform'; tol: number; maxStep: number; step: number };
   block: { span: number; rootFaceFromLeft: number; rootSide: 'left' | 'right';
-           size: { w: number; h: number }; origin: Vec2 };
-  leadIn: Vec2[]; leadOut: Vec2[] | 'reverse';
+           rect: { x: number; y: number; w: number; h: number } };  // same rectangle on both faces
+  plan: CutPlan;
+}
+
+// ---- Cut plan (§4.10) ----
+type PointId = string;
+type PlanPoint =
+  | { kind: 'home' }
+  | { kind: 'split'; split: number }            // matched split k -> kerf point on each face
+  | { kind: 'free'; p: Vec2 }                   // straight wire (same XY both faces)
+  | { kind: 'freePair'; r: Vec2; t: Vec2 };     // unlocked: separate root/tip XY
+
+type PlanStep =
+  | { id: string; kind: 'segment'; seg: number; reversed: boolean }
+  | { id: string; kind: 'line'; from: PointId; to: PointId; speed: 'cut' | 'jog' };
+
+interface CutPlan {
+  points: Record<PointId, PlanPoint>;  // shared, so dragging a point moves both lines that use it
+  steps: PlanStep[];                   // home -> ... -> home
+  template?: 'loop' | 'le-te' | 'custom';
 }
 ```
 
@@ -190,8 +256,12 @@ DXF/SVG ─► parse ─► entities ─► chain/clean ─► Profile (root, ti
                                      stations [(R_k, T_k)]
                                                    │ kerf offset (per side, per station, sync-preserving)
                                                    ▼
-                                     offset stations + corner arcs
-                                                   │ add lead-in/out waypoints
+                                     offset stations + corner arcs (full closed loop)
+                                                   │ walk the cut plan: slice segments (fwd/rev),
+                                                   │ resolve plan points, insert line steps,
+                                                   │ check continuity & block collisions
+                                                   ▼
+                                     face path [(R, T, speedClass)]
                                                    ▼
                                      projection to carriage planes
                                                    │ speed / dwell / cap
@@ -205,7 +275,19 @@ DXF/SVG ─► parse ─► entities ─► chain/clean ─► Profile (root, ti
 
 so Left = P(0) and Right = P(D).
 
-**Timing.** For each move, `t = max(|ΔR|, |ΔT|) / F_seg`. If `max(|ΔL|, |ΔRc|)/t > maxSpeed`, warn, and on export set `t = max(|ΔL|, |ΔRc|) / maxSpeed`.
+**Timing.** For each cut move, `t = max(|ΔR|, |ΔT|) / F_seg`. For a jog move, `t = max(|ΔL|, |ΔRc|) / jogSpeed` (timed at the carriages, since a jog is through air). For any move, if `max(|ΔL|, |ΔRc|)/t > maxSpeed`, warn, and on export set `t = max(|ΔL|, |ΔRc|) / maxSpeed`.
+
+**Plan walk.**
+- Segment step *k*:
+  - Take its stations from the offset loop, from the arc end at its start corner to the arc start at its end corner. Reverse them when `reversed`.
+  - Include a corner arc only when the previous step was the neighbouring segment, continuing in the same direction.
+- Line step: resolve both points to (R, T) pairs.
+  - `split` → that split's kerf point on the side the adjacent segment step uses
+  - `free` → (p, p)
+  - `home` → (home, home)
+  - Emit them as one straight move.
+- Continuity: the end of step *i* must equal the start of step *i+1* within 1e-6, otherwise it's a gap error.
+- Block check: for jog lines, test the face segment against the block rectangle on each face (and the projected wire between them, which is linear, so checking both faces is sufficient).
 
 **Auto-kerf.** The per-face speed is `|Δface|/t`. Look up kerf in the material table by linear interpolation, then offset. One fixed-point pass is enough because kerf barely changes path length.
 
@@ -221,7 +303,8 @@ HuskyFoam/
     io/dxf.ts  io/svg.ts  io/gcodeParse.ts  io/project.ts
     geom/nurbs.ts  geom/chain.ts  geom/polyline.ts  geom/transform.ts
     sync/segments.ts  sync/resample.ts
-    cut/kerf.ts  cut/projection.ts  cut/timing.ts  cut/leads.ts
+    cut/kerf.ts  cut/projection.ts  cut/timing.ts
+    plan/model.ts  plan/walk.ts  plan/templates.ts  plan/checks.ts
     gcode/writer.ts
     validate/checks.ts
   src/ui/                      # React
@@ -239,15 +322,22 @@ Libraries:
 
 ## 8. Testing
 
-- **Regression vs DevFoam.** Back-solve the machine/kerf/speed settings from the more accurate reference `.nc` you'll provide, then keep an automated test: same DXFs in → carriage paths within a tolerance (e.g. 0.005″) of DevFoam's, after resampling both to compare.
+- **Sanity check vs DevFoam** (done in M1). The V-tail reference was back-solved: span 12.07 on 36″, kerf 0.0998/0.1116. Our 4D carriage path is within 0.0035″ RMS and the cut time within 0.03%. The reference runs "a little weird" on the machine, so this is a ballpark check, not ground truth.
 - Unit tests for NURBS evaluation, chaining, resampling equal-count invariants, kerf offset on simple shapes (rectangle, circle), the projection identity (a station with R = T gives L = R = R), and the G93 feed math.
 - A G-code round trip: writer → our parser → identical moves.
+- **Cut plan:**
+  - The Loop template reproduces M1's G-code byte-for-byte.
+  - LE→TE on the V-tail cuts every airfoil segment exactly once, with no gaps.
+  - Out-and-back returns to the same kerf point.
+  - A jog through the block is flagged.
+  - A deliberate gap blocks export, and "bridge with jog" fixes it.
+  - Reversed segments are the exact reverse of forward ones.
 
 ---
 
 ## 9. Milestones
 
-**M1 — Core cut (usable for the V-tail case)**
+**M1 — Core cut (usable for the V-tail case)**: ✅ done (commit `1bbf00d`)
 - DXF import (LINE/ARC/SPLINE/LWPOLYLINE), chaining, auto-split at entity boundaries and corners
 - Equal-count resampling (uniform + adaptive), fixed root/tip kerf, projection, timing with speed cap and warning
 - Lead-in/out waypoints, G-code writer (G93/XYAZ template)
@@ -258,7 +348,15 @@ Libraries:
 
 *Done when: our output matches DevFoam's on the reference part within tolerance, and someone can cut from it.*
 
-**M2 — Editing & presets**
+**M2a — Cut plan** (next; requested after M1)
+- Plan model + walk (segments fwd/rev, line steps, shared points), replacing M1's waypoint lead-in
+- Foam block rectangle on the job; jog speed on the machine preset
+- Templates: Loop (default, M1-identical), LE→TE top & bottom, Out-and-back at a split
+- Canvas editing: split-marker menu, click to place points, drag/Shift-drag, line cut/jog toggle; direction arrows
+- Step list: reorder, reverse, skip, cut/jog, gap rows with bridge fixes
+- Checks: gaps (block export), jog through block, cut ending in foam, uncut/repeated segments
+
+**M2b — Editing & presets**
 - Click/drag split editing, pins, loop start/direction
 - Transforms (twist/pivot, mirror L/R, move/scale, flip)
 - Per-segment kerf/speed overrides, auto-kerf from speed table, corner dwell
@@ -274,7 +372,6 @@ Libraries:
 ---
 
 ## 10. Open items
-1. **Reference G-code for back-solving**: you'll provide a more accurate `.nc` (and the DXFs it came from). Please also give the DevFoam settings used, if you can see them (kerf, speed, block placement, carriage distance).
-2. **Machine facts**: carriage spacing, travel limits, max speed, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay). These go into the first machine preset.
-3. **What "4inback" means** in the example filename (block offset? lead-in?). This helps interpret the reference.
-4. The repo is a personal GitHub repo for now. Note that this folder currently sits inside a git repo rooted at your home directory, so HuskyFoam should get its own `git init` before the first commit.
+1. **Machine facts**: carriage spacing, travel limits, max speed, **jog speed**, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay). The `shop-4axis` preset is a placeholder until then.
+2. **What "4inback" means** in the example filename (block offset? lead-in?), and why the DevFoam file runs "a little weird" on the machine. That may point to something our output should do differently.
+3. **Hosting**: the repo is private (lincolntrahan/huskyfoam). GitHub Pages on a private repo needs a paid plan, so either make it public, use GitHub Pro, or move it to the team org.
