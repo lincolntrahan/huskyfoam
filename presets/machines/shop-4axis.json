@@ -11,6 +11,7 @@
   "axisOrder": ["leftH", "leftV", "rightH", "rightV"],
   "feedMode": "G93",
   "decimals": 6,
+  "dwellUnits": "s",
   "header": "{units}\nG17\nG90\nF{cutSpeed}\nM3",
   "footer": "M5"
 }

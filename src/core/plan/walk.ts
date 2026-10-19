@@ -13,6 +13,8 @@ export interface PathPt extends FacePt {
   step: number;
   /** Arrived at via an inserted line (vs. a profile segment). */
   line: boolean;
+  /** Split index of the profile corner (kerf arc or miter point) this point belongs to, or -1. Used to find corners for dwell. */
+  corner: number;
 }
 
 export interface Gap {
@@ -83,12 +85,14 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2): WalkResul
     }
   };
 
-  const path: PathPt[] = [{ ...homePt, speed: 'cut', step: -1, line: true }];
+  const cornerOf = new Map<FacePt, number>();
+  corners.forEach((c, k) => c.forEach((p) => cornerOf.set(p, k)));
+  const path: PathPt[] = [{ ...homePt, speed: 'cut', step: -1, line: true, corner: -1 }];
   const gaps: Gap[] = [];
   const segUse = new Array<number>(n).fill(0);
   let cur = homePt;
   const push = (pts: FacePt[], speed: PathPt['speed'], step: number, line: boolean) => {
-    for (const p of pts) path.push({ ...p, speed, step, line });
+    for (const p of pts) path.push({ ...p, speed, step, line, corner: cornerOf.get(p) ?? -1 });
     if (pts.length) cur = pts[pts.length - 1];
   };
   const startAt = (start: FacePt, i: number) => {

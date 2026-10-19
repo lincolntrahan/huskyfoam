@@ -1,6 +1,7 @@
 import type { CutResult } from '../core/cut/pipeline';
 import { addSegment, bridgeGap, moveStep, removeStep, reverseStep, setSpeed } from '../core/plan/edit';
 import type { CutPlan, PlanPoint, PlanStep } from '../core/plan/model';
+import type { SegmentOverride } from '../core/types';
 
 interface Props {
   plan: CutPlan;
@@ -10,6 +11,27 @@ interface Props {
   onLeTe: () => void;
   selected: number | null;
   onSelect: (i: number | null) => void;
+  overrides: Record<number, SegmentOverride>;
+  onOverride: (seg: number, o: SegmentOverride) => void;
+  units: string;
+}
+
+/** Optional number: blank means "use the job default". */
+function OptNum(props: { value: number | undefined; placeholder: string; label: string; onChange: (v: number | undefined) => void }) {
+  return (
+    <input
+      type="number"
+      step="any"
+      min={0}
+      aria-label={props.label}
+      placeholder={props.placeholder}
+      value={props.value ?? ''}
+      onChange={(e) => {
+        const v = parseFloat(e.target.value);
+        props.onChange(Number.isFinite(v) ? v : undefined);
+      }}
+    />
+  );
 }
 
 const fmt = (v: number) => v.toFixed(3);
@@ -50,7 +72,7 @@ function GapRow(props: { before: number; plan: CutPlan; n: number; onChange: (p:
   );
 }
 
-export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, onSelect }: Props) {
+export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, onSelect, overrides, onOverride, units }: Props) {
   const n = result.stats.segments;
   const gapsBefore = new Set(result.gaps.map((g) => g.before));
   const stepWarn = new Set(result.warnings.flatMap((w) => (w.step === undefined ? [] : [w.step])));
@@ -85,7 +107,16 @@ export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, on
               onClick={() => onSelect(selected === i ? null : i)}
             >
               <span className="step-num">{i + 1}</span>
-              <span className="step-desc">{describe(s, plan, n)}</span>
+              <span className="step-desc">
+                {describe(s, plan, n)}
+                {s.kind === 'segment' && overrides[s.seg] && (
+                  <span className="badge" title="This segment has its own kerf/speed">
+                    {overrides[s.seg].kerf !== undefined ? `k ${overrides[s.seg].kerf}` : ''}
+                    {overrides[s.seg].kerf !== undefined && overrides[s.seg].speed !== undefined ? ' · ' : ''}
+                    {overrides[s.seg].speed !== undefined ? `v ${overrides[s.seg].speed}` : ''}
+                  </span>
+                )}
+              </span>
               <span className="step-actions" onClick={(e) => e.stopPropagation()}>
                 {s.kind === 'line' && (
                   <button className="speed" onClick={() => onChange(setSpeed(plan, i, s.speed === 'cut' ? 'jog' : 'cut'))} title="Switch between cut and jog speed">
@@ -98,6 +129,32 @@ export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, on
                 <button onClick={() => onChange(removeStep(plan, i))} title="Remove step">✕</button>
               </span>
             </div>
+            {selected === i && s.kind === 'segment' && (
+              <div className="step-override">
+                <span>Segment {s.seg + 1}:</span>
+                <label>
+                  kerf
+                  <OptNum
+                    label={`segment ${s.seg + 1} kerf`}
+                    placeholder="job"
+                    value={overrides[s.seg]?.kerf}
+                    onChange={(v) => onOverride(s.seg, { ...overrides[s.seg], kerf: v })}
+                  />
+                </label>
+                <label>
+                  speed
+                  <OptNum
+                    label={`segment ${s.seg + 1} speed`}
+                    placeholder="job"
+                    value={overrides[s.seg]?.speed}
+                    onChange={(v) => onOverride(s.seg, { ...overrides[s.seg], speed: v })}
+                  />
+                </label>
+                <small className="hint" style={{ margin: 0 }}>
+                  {units}, {units}/min · blank = job value
+                </small>
+              </div>
+            )}
           </li>
         ))}
         {gapsBefore.has(plan.steps.length) && (

@@ -8,7 +8,9 @@ import { splitOffsetLoop, walkPlan, type Gap, type PathPt } from '../plan/walk';
 import { arcLoop, pointAtS, type ArcLoop } from '../geom/arc';
 import { autoSync, syncStations, type SyncSettings } from '../sync/sync';
 import type { JobSettings, MachinePreset } from '../types';
+import { findDwells } from './dwell';
 import { offsetStations, type Station } from './kerf';
+import { kerfAt } from './kerfTable';
 import { applyToProfile, defaultTransforms, sideTransform, syncToRaw, syncToTransformed } from './transform';
 
 export interface CutWarning {
@@ -55,7 +57,7 @@ export interface CutResult {
   start: CarriagePos;
   moves: Move[];
   gcode: string;
-  stats: { cutMinutes: number; maxCarriageSpeed: number; segments: number; moves: number };
+  stats: { cutMinutes: number; maxCarriageSpeed: number; segments: number; moves: number; dwells: number };
 }
 
 /** Linear map from the two face planes to the two carriage planes. */
@@ -89,7 +91,7 @@ function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
     start: { left: z, right: z },
     moves: [],
     gcode: '',
-    stats: { cutMinutes: 0, maxCarriageSpeed: 0, segments: 0, moves: 0 },
+    stats: { cutMinutes: 0, maxCarriageSpeed: 0, segments: 0, moves: 0, dwells: 0 },
   };
 }
 
@@ -171,12 +173,39 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   const stations: Station[] = synced.stations;
   warnings.push(...synced.warnings.map((message) => ({ message })));
 
-  // 3. Kerf, on the full closed loop
-  const kerfFor = (side: 'root' | 'tip') => (seg: number) => job.segmentKerf[seg] ?? job.kerf[side];
+  // 4. Kerf, on the full closed loop. Segment overrides win; otherwise fixed per face, or from
+  //    the material's kerf table at the speed each face actually moves at that point.
+  const over = job.segmentOverrides ?? {};
+  const segSpeed = (seg: number) => over[seg]?.speed ?? job.cutSpeed;
+  let kerfFor = (side: 'root' | 'tip') => (_i: number, seg: number) => over[seg]?.kerf ?? job.kerf[side];
+  if (job.kerf.mode === 'auto') {
+    if (!job.kerfTable?.length) {
+      warnings.push({ message: 'Auto kerf needs a kerf table in the material (use the kerf test). Using the fixed root/tip kerf instead.' });
+    } else {
+      let clamped = 0;
+      const faceKerf = (side: 'root' | 'tip') =>
+        stations.map((st, i) => {
+          const next = stations[(i + 1) % stations.length];
+          const dr = dist(st.r, next.r);
+          const dt = dist(st.t, next.t);
+          const m = Math.max(dr, dt);
+          // the faster face moves at the segment's cut speed; the other in proportion
+          const v = m > 0 ? (segSpeed(st.seg) * (side === 'root' ? dr : dt)) / m : segSpeed(st.seg);
+          const k = kerfAt(job.kerfTable, v);
+          if (k.clamped) clamped++;
+          return k.kerf;
+        });
+      const table = { root: faceKerf('root'), tip: faceKerf('tip') };
+      kerfFor = (side) => (i, seg) => over[seg]?.kerf ?? table[side][i];
+      if (clamped) {
+        warnings.push({ message: `${clamped} point${clamped === 1 ? ' moves' : 's move'} faster or slower than the kerf table covers; the nearest table kerf was used.` });
+      }
+    }
+  }
   const kerfStations = offsetStations(stations, kerfFor('root'), kerfFor('tip'));
   const closeLoop = (s: Station[]) => [...s, { ...s[0], boundary: false }];
 
-  // 4. Walk the cut plan
+  // 5. Walk the cut plan
   const plan = job.plan ?? loopPlan(n);
   const home = machine.home;
   let walk;
@@ -199,7 +228,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     if (count > 1) warnings.push({ message: `Segment ${k + 1} is cut ${count} times.` });
   });
 
-  // 5. Project and time each move
+  // 6. Project and time each move
   const project = projector(job, machine);
   const start = project(home, home);
   const moves: Move[] = [];
@@ -210,7 +239,14 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   let capped = 0;
   let firstCapped = -1;
   const jogHits = new Set<number>();
+  /** Index of the last move emitted up to each path point (for placing dwells). */
+  const moveAt: number[] = [-1];
+  const stepSpeed = (step: number) => {
+    const st = plan.steps[step];
+    return st?.kind === 'segment' ? segSpeed(st.seg) : job.cutSpeed;
+  };
   for (const p of walk.path.slice(1)) {
+    moveAt.push(moves.length - 1);
     if (p.speed === 'gap') {
       prevFace = p;
       prevCar = project(p.r, p.t);
@@ -223,7 +259,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     if (p.speed === 'jog' && hasBlock(job.block) && (crossesRect(prevFace.r, p.r, job.block) || crossesRect(prevFace.t, p.t, job.block))) {
       jogHits.add(p.step);
     }
-    let minutes = p.speed === 'jog' ? dCar / machine.jogSpeed : dFace / job.cutSpeed;
+    let minutes = p.speed === 'jog' ? dCar / machine.jogSpeed : dFace / stepSpeed(p.step);
     const speed = minutes > 0 ? dCar / minutes : Infinity;
     maxCarriageSpeed = Math.max(maxCarriageSpeed, speed);
     if (speed > machine.maxSpeed) {
@@ -233,8 +269,21 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     }
     moves.push({ left: car.left, right: car.right, minutes, lead: p.line, speed: p.speed, step: p.step });
     cutMinutes += minutes;
+    moveAt[moveAt.length - 1] = moves.length - 1;
     prevFace = p;
     prevCar = car;
+  }
+
+  // 7. Corner dwell
+  let dwells = 0;
+  if (job.dwell?.enabled && job.dwell.seconds > 0) {
+    for (const j of findDwells(walk.path, job.dwell.angleDeg)) {
+      const mi = moveAt[j];
+      if (mi < 0 || moves[mi].dwell) continue;
+      moves[mi].dwell = job.dwell.seconds;
+      cutMinutes += job.dwell.seconds / 60;
+      dwells++;
+    }
   }
   if (capped) {
     warnings.push({
@@ -284,7 +333,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     gaps: walk.gaps,
     start,
     moves,
-    gcode: ok ? writeGcode(start, moves, machine, job.cutSpeed) : '',
-    stats: { cutMinutes, maxCarriageSpeed, segments: n, moves: moves.length },
+    gcode: ok ? writeGcode(start, moves, machine, job.cutSpeed, { wireWatts: job.wireWatts }) : '',
+    stats: { cutMinutes, maxCarriageSpeed, segments: n, moves: moves.length, dwells },
   };
 }

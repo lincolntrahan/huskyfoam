@@ -1,35 +1,26 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
 import type { SyncEdit } from '../core/sync/edit';
 import type { Vec2 } from '../core/geom/vec';
 import type { Profile } from '../core/geom/profile';
 import { loadDxfProfile } from '../core/io/loadProfile';
+import { makeProject, parseProject, type SourceFile } from '../core/io/project';
+import { remapSegmentMap } from '../core/plan/remap';
 import type { CutPlan } from '../core/plan/model';
 import { leTePlan, loopPlan, type Rect } from '../core/plan/templates';
-import { defaultJob, machines, materials } from '../core/presets';
-import type { JobSettings } from '../core/types';
+import { defaultJob } from '../core/presets';
+import type { JobSettings, MaterialPreset } from '../core/types';
 import exampleRoot from '../../tests/fixtures/vtail-root.dxf?raw';
 import exampleTip from '../../tests/fixtures/vtail-tip.dxf?raw';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel } from './PlanPanel';
 import { TransformPanel } from './TransformPanel';
+import { download, MachineEditor, MaterialEditor } from './PresetEditor';
+import { usePresets } from './usePresets';
 import { Preview2D, type Layers, type Sides } from './Preview2D';
 
-interface SourceFile {
-  name: string;
-  text: string;
-}
+const AUTOSAVE = 'huskyfoam:autosave';
 
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-/** Bounding box of both positioned profiles, grown by `margin`. */
 /** Bounding box of the given (already positioned) points, grown by `margin`. */
 function fitBlock(pts: Vec2[], margin: number): Rect {
   const xs = pts.map((p) => p.x);
@@ -68,10 +59,12 @@ function FileRow(props: { label: string; color: string; file: SourceFile | null;
 }
 
 export function App() {
-  const [machineId, setMachineId] = useState(machines[0].id);
-  const [materialId, setMaterialId] = useState(materials[0].id);
-  const machine = machines.find((m) => m.id === machineId)!;
-  const material = materials.find((m) => m.id === materialId)!;
+  const presets = usePresets();
+  const [machineId, setMachineId] = useState(presets.machines[0].id);
+  const [materialId, setMaterialId] = useState(presets.materials[0].id);
+  const machine = presets.machines.find((m) => m.id === machineId) ?? presets.machines[0];
+  const material = presets.materials.find((m) => m.id === materialId) ?? presets.materials[0];
+  const [editor, setEditor] = useState<'machine' | 'material' | null>(null);
 
   const [job, setJob] = useState<JobSettings>(() => defaultJob(machine, material));
   const [rootFile, setRootFile] = useState<SourceFile | null>(null);
@@ -83,6 +76,17 @@ export function App() {
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
 
   const patch = (p: Partial<JobSettings>) => setJob((j) => ({ ...j, ...p }));
+  const applyMaterial = (mat: MaterialPreset) => {
+    setMaterialId(mat.id);
+    setJob((j) => ({
+      ...j,
+      cutSpeed: mat.cutSpeed,
+      kerf: { ...j.kerf, root: mat.kerfRoot, tip: mat.kerfTip },
+      kerfTable: mat.kerfTable ?? [],
+      dwell: mat.cornerDwell ?? j.dwell,
+      wireWatts: mat.wireWatts ?? null,
+    }));
+  };
 
   const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units) : null), [rootFile, machine.units]);
   const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units) : null), [tipFile, machine.units]);
@@ -92,6 +96,54 @@ export function App() {
     [root, tip, job, machine],
   );
   const plan: CutPlan | null = result?.plan ?? null;
+
+  // Autosave the current job in this browser; restore it once on start-up.
+  const restored = useRef(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AUTOSAVE);
+      if (saved) openProject(saved, 'Restored your last session from this browser.');
+    } catch {
+      /* nothing usable saved */
+    }
+    restored.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!restored.current) return;
+    const t = setTimeout(() => {
+      try {
+        if (rootFile || tipFile) localStorage.setItem(AUTOSAVE, JSON.stringify(makeProject(rootFile, tipFile, job, machine, material)));
+      } catch {
+        /* storage full or blocked: autosave is best-effort */
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [rootFile, tipFile, job, machine, material]);
+
+  function openProject(text: string, message: string) {
+    const p = parseProject(text);
+    const mId = presets.adopt('machine', p.machine);
+    const matId = presets.adopt('material', p.material);
+    setMachineId(mId);
+    setMaterialId(matId);
+    setRootFile(p.root);
+    setTipFile(p.tip);
+    setJob(p.job); // already normalized for older projects
+    setSelectedStep(null);
+    setNotice(message);
+  }
+  const startFresh = () => {
+    try {
+      localStorage.removeItem(AUTOSAVE);
+    } catch {
+      /* ignore */
+    }
+    setRootFile(null);
+    setTipFile(null);
+    setJob(defaultJob(machine, material));
+    setNotice(null);
+  };
   const setPlan = (p: CutPlan) => patch({ plan: p });
 
   const importWarnings = [
@@ -112,7 +164,8 @@ export function App() {
   // Sync edits arrive in cut space (what's on screen); store them in the job's raw form.
   const onSyncChange = (e: SyncEdit) => {
     if (!result?.syncToJob) return;
-    patch({ sync: result.syncToJob(e.sync), plan: e.plan });
+    const segmentOverrides = e.change ? remapSegmentMap(job.segmentOverrides, e.change) : job.segmentOverrides;
+    patch({ sync: result.syncToJob(e.sync), plan: e.plan, segmentOverrides });
     setNotice(e.note ?? null);
   };
   const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', k: number) => {
@@ -133,7 +186,7 @@ export function App() {
       span: 12.07,
       rootFaceFromLeft: (machine.carriageSpacing - 12.07) / 2,
       rootSide: 'left',
-      kerf: { root: 0.0998, tip: 0.1116 },
+      kerf: { mode: 'fixed', root: 0.0998, tip: 0.1116 },
       offset,
       block: fitBlock([...rootLoaded.pts, ...tipLoaded.pts].map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })), 0.1),
       sync: null,
@@ -158,28 +211,48 @@ export function App() {
         <h1>HuskyFoam</h1>
         <label>
           Machine
-          <select value={machineId} onChange={(e) => setMachineId(e.target.value)}>
-            {machines.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
+          <select value={machine.id} onChange={(e) => setMachineId(e.target.value)}>
+            {presetOptions(presets.machines, (id) => presets.origin('machine', id))}
           </select>
+          <button onClick={() => setEditor('machine')} title="Edit or copy this machine">
+            Edit…
+          </button>
         </label>
         <label>
           Material
-          <select
-            value={materialId}
-            onChange={(e) => {
-              const mat = materials.find((m) => m.id === e.target.value)!;
-              setMaterialId(mat.id);
-              patch({ cutSpeed: mat.cutSpeed, kerf: { root: mat.kerfRoot, tip: mat.kerfTip } });
-            }}
-          >
-            {materials.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
+          <select value={material.id} onChange={(e) => applyMaterial(presets.materials.find((m) => m.id === e.target.value)!)}>
+            {presetOptions(presets.materials, (id) => presets.origin('material', id))}
           </select>
+          <button onClick={() => setEditor('material')} title="Edit or copy this material (kerf table, kerf test, dwell, wire power)">
+            Edit…
+          </button>
         </label>
         <div className="spacer" />
+        <button
+          onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json,.hfoam.json';
+            input.onchange = async () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              try {
+                openProject(await file.text(), `Opened ${file.name}.`);
+              } catch (err) {
+                setNotice((err as Error).message);
+              }
+            };
+            input.click();
+          }}
+        >
+          Open project…
+        </button>
+        <button
+          disabled={!rootFile && !tipFile}
+          onClick={() => download(`${baseName}.hfoam.json`, JSON.stringify(makeProject(rootFile, tipFile, job, machine, material), null, 1), 'application/json')}
+        >
+          Save project
+        </button>
         <button className="primary" disabled={!result?.ok} onClick={() => result && download(`${baseName}.nc`, result.gcode)}>
           Export G-code
         </button>
@@ -225,7 +298,18 @@ export function App() {
           </section>
 
           {plan && result && (
-            <PlanPanel plan={plan} result={result} onChange={setPlan} onLoop={(reversed) => patch({ plan: loopPlan(result.stats.segments, reversed) })} onLeTe={applyLeTe} selected={selectedStep} onSelect={setSelectedStep} />
+            <PlanPanel
+              overrides={job.segmentOverrides}
+              onOverride={(seg, o) => {
+                const next = { ...job.segmentOverrides };
+                if (o.kerf === undefined && o.speed === undefined) delete next[seg];
+                else next[seg] = o;
+                patch({ segmentOverrides: next });
+              }}
+              units={u}
+              plan={plan}
+              result={result}
+              onChange={setPlan} onLoop={(reversed) => patch({ plan: loopPlan(result.stats.segments, reversed) })} onLeTe={applyLeTe} selected={selectedStep} onSelect={setSelectedStep} />
           )}
           <section>
             <NumberField label={`Template clearance (${u})`} value={clearance} min={0} onChange={setClearance} hint="How far outside the block the LE→TE template puts run-in/out and jog points" />
@@ -243,9 +327,58 @@ export function App() {
 
           <section>
             <h2>Kerf & speed</h2>
+            <SelectField
+              label="Kerf"
+              value={job.kerf.mode}
+              options={[
+                { value: 'fixed', label: 'Fixed root / tip' },
+                { value: 'auto', label: job.kerfTable.length ? 'Auto from speed' : 'Auto (no kerf table yet)' },
+              ]}
+              onChange={(v) => patch({ kerf: { ...job.kerf, mode: v } })}
+            />
+            {job.kerf.mode === 'auto' && (
+              <small className="hint">
+                {job.kerfTable.length
+                  ? `Kerf comes from the material's ${job.kerfTable.length}-row speed table, per point; segment overrides still win.`
+                  : 'The material has no kerf table. Fill it with the kerf test (Material → Edit…). Until then the fixed values below are used.'}
+              </small>
+            )}
             <NumberField label={`Root kerf (${u})`} value={job.kerf.root} min={0} step={0.001} onChange={(v) => patch({ kerf: { ...job.kerf, root: v } })} hint="Full kerf width at the root face; the path is offset by half" />
             <NumberField label={`Tip kerf (${u})`} value={job.kerf.tip} min={0} step={0.001} onChange={(v) => patch({ kerf: { ...job.kerf, tip: v } })} />
             <NumberField label={`Cut speed (${u}/min)`} value={job.cutSpeed} min={0} onChange={(v) => patch({ cutSpeed: v })} hint="Wire speed at the faster foam face" />
+            <label className="field" title="Set your hot-wire supply to this. Goes into the G-code as a comment and the {wireWatts} header token.">
+              <span>Wire power (W)</span>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                placeholder="not set"
+                value={job.wireWatts ?? ''}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  patch({ wireWatts: Number.isFinite(v) ? v : null });
+                }}
+              />
+            </label>
+            <small className="hint">Per-segment kerf and speed: select a segment in the cut plan list (or click it on the canvas).</small>
+          </section>
+
+          <section>
+            <h2>Corner dwell</h2>
+            <label className="check">
+              <input type="checkbox" checked={job.dwell.enabled} onChange={(e) => patch({ dwell: { ...job.dwell, enabled: e.target.checked } })} />
+              Pause at sharp corners
+            </label>
+            {job.dwell.enabled && (
+              <>
+                <NumberField label="Corners sharper than (°)" value={job.dwell.angleDeg} min={1} onChange={(v) => patch({ dwell: { ...job.dwell, angleDeg: v } })} />
+                <NumberField label="Pause (s)" value={job.dwell.seconds} min={0} onChange={(v) => patch({ dwell: { ...job.dwell, seconds: v } })} />
+                <small className="hint">
+                  Sent as G4 P{machine.dwellUnits === 'ms' ? ' in milliseconds' : ' in seconds'} (machine setting).{' '}
+                  {result ? `${result.stats.dwells} pause${result.stats.dwells === 1 ? '' : 's'} in this cut.` : ''}
+                </small>
+              </>
+            )}
           </section>
 
           <section>
@@ -337,6 +470,8 @@ export function App() {
                 <span>Steps <b>{plan?.steps.length ?? 0}</b></span>
                 <span>Moves <b>{result.stats.moves}</b></span>
                 <span>Time <b>{result.stats.cutMinutes.toFixed(1)} min</b></span>
+                {result.stats.dwells > 0 && <span>Dwells <b>{result.stats.dwells}</b></span>}
+                {job.wireWatts != null && <span>Wire <b>{job.wireWatts} W</b></span>}
                 <span>Max carriage speed <b>{result.stats.maxCarriageSpeed.toFixed(2)} {u}/min</b> (cap {machine.maxSpeed})</span>
                 <span>
                   <span className="swatch" style={{ background: 'var(--cut)' }} />cut
@@ -350,7 +485,10 @@ export function App() {
             {result?.errors.map((e, i) => <div key={`e${i}`} className="msg err">{e}</div>)}
             {notice && (
               <div className="msg info">
-                {notice} <button onClick={() => setNotice(null)}>OK</button>
+                <span>{notice}</span>
+                <span>
+                  {notice.startsWith('Restored') && <button onClick={startFresh}>Start fresh</button>} <button onClick={() => setNotice(null)}>OK</button>
+                </span>
               </div>
             )}
             {[...importWarnings, ...(result?.warnings.map((w) => w.message) ?? [])].map((w, i) => (
@@ -359,6 +497,62 @@ export function App() {
           </div>
         </div>
       </div>
+
+      {editor === 'machine' && (
+        <MachineEditor
+          initial={machine}
+          origin={presets.origin('machine', machine.id)}
+          onSave={(m, asCopy) => {
+            setMachineId(presets.save('machine', m, asCopy));
+            setEditor(null);
+          }}
+          onDelete={() => {
+            presets.remove('machine', machine.id);
+            setMachineId(presets.machines[0].id);
+            setEditor(null);
+          }}
+          onClose={() => setEditor(null)}
+        />
+      )}
+      {editor === 'material' && (
+        <MaterialEditor
+          initial={material}
+          origin={presets.origin('material', material.id)}
+          machine={machine}
+          onSave={(m, asCopy) => {
+            const id = presets.save('material', m, asCopy);
+            applyMaterial({ ...m, id });
+            setEditor(null);
+          }}
+          onDelete={() => {
+            presets.remove('material', material.id);
+            applyMaterial(presets.materials[0]);
+            setEditor(null);
+          }}
+          onClose={() => setEditor(null)}
+        />
+      )}
     </div>
   );
+}
+
+/** Options grouped by where the preset lives. */
+function presetOptions(list: { id: string; name: string }[], origin: (id: string) => string) {
+  const groups: [string, string][] = [
+    ['repo', 'Team (repo)'],
+    ['local', 'This browser'],
+    ['project', 'From a project'],
+  ];
+  return groups.map(([key, label]) => {
+    const items = list.filter((p) => origin(p.id) === key);
+    return items.length ? (
+      <optgroup key={key} label={label}>
+        {items.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </optgroup>
+    ) : null;
+  });
 }

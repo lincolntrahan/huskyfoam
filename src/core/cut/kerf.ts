@@ -68,15 +68,15 @@ function sideCorner(pts: Vec2[], i: number, h: number, isBoundary: boolean): Sid
  */
 export function offsetStations(
   stations: Station[],
-  kerfRoot: (seg: number) => number,
-  kerfTip: (seg: number) => number,
+  kerfRoot: (i: number, seg: number) => number,
+  kerfTip: (i: number, seg: number) => number,
 ): Station[] {
   const R = stations.map((s) => s.r);
   const T = stations.map((s) => s.t);
   const out: Station[] = [];
   stations.forEach((s, i) => {
-    const cr = sideCorner(R, i, kerfRoot(s.seg) / 2, s.boundary);
-    const ct = sideCorner(T, i, kerfTip(s.seg) / 2, s.boundary);
+    const cr = sideCorner(R, i, kerfRoot(i, s.seg) / 2, s.boundary);
+    const ct = sideCorner(T, i, kerfTip(i, s.seg) / 2, s.boundary);
     const m = Math.max(cr.arcCount, ct.arcCount);
     for (let j = 0; j <= m; j++) {
       out.push({ r: cr.at(j, m), t: ct.at(j, m), seg: s.seg, boundary: s.boundary && j === 0, corner: s.boundary });

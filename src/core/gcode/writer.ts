@@ -12,6 +12,8 @@ export interface Move {
   speed?: 'cut' | 'jog';
   /** Plan step that produced this move. */
   step?: number;
+  /** Corner dwell after this move, in seconds. */
+  dwell?: number;
 }
 
 export interface CarriagePos {
@@ -19,16 +21,31 @@ export interface CarriagePos {
   right: Vec2;
 }
 
+export interface WriteOptions {
+  /** Wire power from the material; adds a comment and fills the {wireWatts} header token. */
+  wireWatts?: number | null;
+}
+
 function axisWords(p: CarriagePos, m: MachinePreset): string {
   const vals = { leftH: p.left.x, leftV: p.left.y, rightH: p.right.x, rightV: p.right.y };
   return m.axisOrder.map((k) => `${m.axes[k]}${vals[k].toFixed(m.decimals)}`).join('');
 }
 
-export function writeGcode(start: CarriagePos, moves: Move[], m: MachinePreset, cutSpeed: number): string {
+/** Shortest decimal form (no trailing zeros), for dwell times and watts. */
+const short = (v: number, digits: number) => String(Number(v.toFixed(digits)));
+
+export function dwellLine(seconds: number, m: MachinePreset): string {
+  return m.dwellUnits === 'ms' ? `G4 P${Math.round(seconds * 1000)}` : `G4 P${short(seconds, 3)}`;
+}
+
+export function writeGcode(start: CarriagePos, moves: Move[], m: MachinePreset, cutSpeed: number, opts: WriteOptions = {}): string {
   const lines: string[] = [];
+  const watts = opts.wireWatts;
   const header = m.header
     .replaceAll('{units}', m.units === 'in' ? 'G20' : 'G21')
-    .replaceAll('{cutSpeed}', cutSpeed.toFixed(6));
+    .replaceAll('{cutSpeed}', cutSpeed.toFixed(6))
+    .replaceAll('{wireWatts}', watts != null ? short(watts, 1) : '');
+  if (watts != null) lines.push(`(Set wire power to ${short(watts, 1)} W)`);
   lines.push(...header.split(/\r?\n/).filter((l) => l.trim()));
   lines.push(`G0${axisWords(start, m)}`);
   lines.push(m.feedMode);
@@ -41,6 +58,7 @@ export function writeGcode(start: CarriagePos, moves: Move[], m: MachinePreset, 
       f = d / mv.minutes;
     }
     lines.push(`G1${axisWords(mv, m)}F${f.toFixed(6)}`);
+    if (mv.dwell && mv.dwell > 0) lines.push(dwellLine(mv.dwell, m));
     prev = mv;
   }
   lines.push(...m.footer.split(/\r?\n/).filter((l) => l.trim()));

@@ -34,6 +34,21 @@ export interface MachinePreset {
   /** Header template. Tokens: {units} -> G20/G21, {cutSpeed}. */
   header: string;
   footer: string;
+  /** How the controller reads G4 P: seconds (Mach3 default) or milliseconds. */
+  dwellUnits?: 's' | 'ms';
+}
+
+/** One measured point of kerf vs. wire speed (speed at that foam face, units/min). */
+export interface KerfPoint {
+  speed: number;
+  kerf: number;
+}
+
+export interface DwellSettings {
+  enabled: boolean;
+  /** Pause at corners where the cut path turns more than this. */
+  angleDeg: number;
+  seconds: number;
 }
 
 export interface MaterialPreset {
@@ -44,6 +59,19 @@ export interface MaterialPreset {
   cutSpeed: number;
   kerfRoot: number;
   kerfTip: number;
+  /** Optional kerf-vs-speed table for "auto from speed" kerf (fill it with the kerf test). */
+  kerfTable?: KerfPoint[];
+  /** Default corner dwell for this material (contact cutting needs it; radiant usually not). */
+  cornerDwell?: DwellSettings;
+  /** Hot-wire power to set on the cutter's supply, watts. Written as a comment and {wireWatts}. */
+  wireWatts?: number;
+}
+
+/** Per-segment overrides (both faces), keyed by segment index in cut order. */
+export interface SegmentOverride {
+  kerf?: number;
+  /** Cut speed at the faster face for this segment, units/min. */
+  speed?: number;
 }
 
 export interface SamplingSettings {
@@ -64,10 +92,19 @@ export interface JobSettings {
   rootSide: 'left' | 'right';
   /** Translation applied to both profiles (positions the part in machine XY). */
   offset: Vec2;
-  /** Full kerf width at each face; the path is offset by half of it. */
-  kerf: { root: number; tip: number };
-  /** Per-segment kerf override (both faces), by segment index. */
-  segmentKerf: Record<number, number>;
+  /**
+   * Full kerf width at each face; the path is offset by half of it. In 'auto' mode the kerf
+   * at every point comes from `kerfTable` and how fast that face is moving there.
+   */
+  kerf: { mode: 'fixed' | 'auto'; root: number; tip: number };
+  /** Kerf vs. speed, copied from the material when it's selected. */
+  kerfTable: KerfPoint[];
+  /** Per-segment kerf / speed overrides (both faces), by segment index. */
+  segmentOverrides: Record<number, SegmentOverride>;
+  /** Pause at sharp corners so the wire catches up. */
+  dwell: DwellSettings;
+  /** Hot-wire power for this job, watts (from the material); null = not specified. */
+  wireWatts: number | null;
   /** Cut speed at the faster face, units/min. */
   cutSpeed: number;
   sampling: SamplingSettings;

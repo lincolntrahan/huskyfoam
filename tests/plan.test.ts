@@ -20,7 +20,7 @@ function vtailJob(mode: 'uniform' | 'adaptive' = 'uniform'): JobSettings {
   const job = defaultJob(machine, material);
   job.span = 12.07;
   job.rootFaceFromLeft = (machine.carriageSpacing - job.span) / 2;
-  job.kerf = { root: 0.0998, tip: 0.1116 };
+  job.kerf = { mode: 'fixed', root: 0.0998, tip: 0.1116 };
   job.offset = { x: 4.7221, y: 0.7001 };
   job.sampling.mode = mode;
   return job;
@@ -145,7 +145,7 @@ describe('reversed segments', () => {
       { pts: [{ x: 7, y: 4 }, { x: 5, y: 4 }], source: 'LINE' },
       { pts: [{ x: 5, y: 4 }, { x: 5, y: 2 }], source: 'LINE' },
     ]).profile!;
-    const job = { ...defaultJob(machine, material), kerf: { root: 0, tip: 0 } };
+    const job: JobSettings = { ...defaultJob(machine, material), kerf: { mode: 'fixed', root: 0, tip: 0 } };
     job.sampling = { ...job.sampling, mode: 'uniform', step: 0.25 };
     const pts = { [HOME]: { kind: 'home' as const }, [splitId(0)]: { kind: 'split' as const, split: 0 }, [splitId(1)]: { kind: 'split' as const, split: 1 } };
     const fwd: CutPlan = {
