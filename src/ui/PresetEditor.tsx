@@ -284,6 +284,16 @@ export function MaterialEditor(props: {
         />
       </label>
       <h3>Kerf ({u})</h3>
+      <SelectField
+        label="Kerf"
+        value={m.kerfMode ?? 'fixed'}
+        options={[
+          { value: 'fixed', label: 'Fixed root / tip' },
+          { value: 'auto', label: 'Auto from speed table' },
+        ]}
+        onChange={(v) => set({ kerfMode: v })}
+      />
+      {m.kerfMode === 'auto' && !m.kerfTable?.length && <small className="hint">Fill the table below (or run the kerf test); until then the fixed values are used.</small>}
       <NumberField label="Root kerf (fixed mode)" value={m.kerfRoot} onChange={(v) => set({ kerfRoot: v })} />
       <NumberField label="Tip kerf (fixed mode)" value={m.kerfTip} onChange={(v) => set({ kerfTip: v })} />
       <h3>Kerf vs. speed (auto mode)</h3>

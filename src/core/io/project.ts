@@ -39,6 +39,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     kerf: { ...d.kerf, ...(job.kerf ?? {}) },
     sampling: { ...d.sampling, ...(job.sampling ?? {}) },
     block: { ...d.block, ...(job.block ?? {}) },
+    profile: { ...d.profile, ...(job.profile ?? {}) },
     dwell: { ...d.dwell, ...(job.dwell ?? {}) },
     transforms: {
       ...defaultTransforms(),

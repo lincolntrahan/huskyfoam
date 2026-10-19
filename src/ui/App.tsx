@@ -57,7 +57,7 @@ export function App() {
     setJob((j) => ({
       ...j,
       cutSpeed: mat.cutSpeed,
-      kerf: { ...j.kerf, root: mat.kerfRoot, tip: mat.kerfTip },
+      kerf: { mode: mat.kerfMode ?? 'fixed', root: mat.kerfRoot, tip: mat.kerfTip },
       kerfTable: mat.kerfTable ?? [],
       dwell: mat.cornerDwell ?? j.dwell,
       wireWatts: mat.wireWatts ?? null,

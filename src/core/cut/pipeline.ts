@@ -67,9 +67,27 @@ export interface CutResult {
 }
 
 /** Linear map from the two face planes to the two carriage planes. */
+/**
+ * Where the root and tip profile planes sit along the wire. By default they are the block's
+ * faces; with a profile distance and inset they sit inside (or past) the block.
+ */
+export function profilePlanes(job: JobSettings): { zr: number; zt: number; distance: number; inset: number } {
+  const span = job.span;
+  const distance = job.profile?.distance ?? span;
+  const inset = job.profile?.inset ?? (span - distance) / 2;
+  if (job.profile?.distance == null && job.profile?.inset == null) {
+    // profiles on the block faces: keep the original arithmetic so output stays bit-identical
+    const zr = job.rootSide === 'left' ? job.rootFaceFromLeft : job.rootFaceFromLeft + span;
+    const zt = job.rootSide === 'left' ? job.rootFaceFromLeft + span : job.rootFaceFromLeft;
+    return { zr, zt, distance, inset };
+  }
+  const zr = job.rootSide === 'left' ? job.rootFaceFromLeft + inset : job.rootFaceFromLeft + span - inset;
+  const zt = job.rootSide === 'left' ? zr + distance : zr - distance;
+  return { zr, zt, distance, inset };
+}
+
 export function projector(job: JobSettings, machine: MachinePreset) {
-  const zr = job.rootSide === 'left' ? job.rootFaceFromLeft : job.rootFaceFromLeft + job.span;
-  const zt = job.rootSide === 'left' ? job.rootFaceFromLeft + job.span : job.rootFaceFromLeft;
+  const { zr, zt } = profilePlanes(job);
   const a = (0 - zr) / (zt - zr);
   const b = (machine.carriageSpacing - zr) / (zt - zr);
   return (r: Vec2, t: Vec2): CarriagePos => ({ left: lerp(r, t, a), right: lerp(r, t, b) });
@@ -133,8 +151,13 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   const warnings: CutWarning[] = [];
 
   if (job.span <= 0) return emptyResult(['Block span must be greater than zero.'], 'setup');
+  const planes = profilePlanes(job);
+  if (!(planes.distance > 0)) return emptyResult(['Profile distance must be greater than zero.'], 'transform');
   if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.'], 'setup');
 
+  if (planes.inset < -1e-9 || planes.inset + planes.distance > job.span + 1e-9) {
+    warnings.push({ stage: 'transform', message: 'The profiles sit outside the foam block along the wire (check profile distance and inset against the block span).' });
+  }
   const T = job.transforms ?? defaultTransforms();
   if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.'], 'transform');
 
