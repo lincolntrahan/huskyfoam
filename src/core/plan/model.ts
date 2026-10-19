@@ -17,42 +17,78 @@ export type PlanPoint =
    * (straight up from home, then across to the split). Follows the split when it moves.
    * `corner: 'last'` levels with the far side of the split's kerf corner (reversed loops).
    */
-  | { kind: 'level'; split: number; corner?: 'last' };
+  | { kind: 'level'; split: number; corner?: 'last' }
+  /**
+   * Straight above split k's kerf point (on each face) at the safe jog height: where a plunge
+   * into an inner contour starts and ends. `corner: 'last'` as for 'level'.
+   */
+  | { kind: 'above'; split: number; corner?: 'last' };
 
 export type Speed = 'cut' | 'jog';
 
-export interface SegmentStep {
+interface StepBase {
   id: string;
+  /** Folder the step is in (a PlanGroup id); none = top level. */
+  group?: string;
+}
+
+export interface SegmentStep extends StepBase {
   kind: 'segment';
   seg: number;
   reversed: boolean;
 }
 
-export interface LineStep {
-  id: string;
+export interface LineStep extends StepBase {
   kind: 'line';
   from: string;
   to: string;
   speed: Speed;
 }
 
-export type PlanStep = SegmentStep | LineStep;
+/**
+ * Jog from wherever the wire is to a point. 'over' goes straight up to the safe height, across,
+ * and down to the point (straight when the point is directly above or below); 'straight' is a
+ * direct move.
+ */
+export interface JogStep extends StepBase {
+  kind: 'jog';
+  to: string;
+  route: 'over' | 'straight';
+}
+
+export type PlanStep = SegmentStep | LineStep | JogStep;
+
+/** A folder of steps in the sequence tree (one level). */
+export interface PlanGroup {
+  id: string;
+  name: string;
+  /** Contour pair a template folder cuts. */
+  pair?: number;
+  /** Template that made it. */
+  template?: 'loop' | 'loop-reverse' | 'le-te';
+}
 
 export interface CutPlan {
   /** Shared points; consecutive lines reference the same id, so dragging moves both. */
   points: Record<string, PlanPoint>;
   steps: PlanStep[];
   template: 'loop' | 'loop-reverse' | 'le-te' | 'custom';
+  /** Folders; a folder's steps are the consecutive steps carrying its id. */
+  groups?: PlanGroup[];
 }
+
 
 export const HOME = 'home';
 export const splitId = (k: number) => `s${k}`;
+
+/** A plan with nothing sequenced yet (new jobs start like this). */
+export const emptyPlan = (): CutPlan => ({ points: { [HOME]: { kind: 'home' } }, steps: [], template: 'custom', groups: [] });
 
 /** A fresh id with the given prefix that isn't used by any point or step. */
 export function newId(plan: CutPlan, prefix: string): string {
   let max = 0;
   const re = new RegExp(`^${prefix}(\\d+)$`);
-  for (const id of [...Object.keys(plan.points), ...plan.steps.map((s) => s.id)]) {
+  for (const id of [...Object.keys(plan.points), ...plan.steps.map((s) => s.id), ...(plan.groups ?? []).map((g) => g.id)]) {
     const m = re.exec(id);
     if (m) max = Math.max(max, Number(m[1]));
   }
@@ -122,10 +158,11 @@ export function segEndSplit(s: SegmentStep, t: Topo): number {
 /** Point id a step starts / ends at, creating the split point entry if needed. */
 export function stepStartRef(plan: CutPlan, step: PlanStep, t: Topo): string {
   if (step.kind === 'line') return step.from;
+  if (step.kind === 'jog') return step.to; // starts wherever the wire is: never leaves a gap
   return ensureSplit(plan, segStartSplit(step, t));
 }
 export function stepEndRef(plan: CutPlan, step: PlanStep, t: Topo): string {
-  if (step.kind === 'line') return step.to;
+  if (step.kind === 'line' || step.kind === 'jog') return step.to;
   return ensureSplit(plan, segEndSplit(step, t));
 }
 
@@ -143,7 +180,10 @@ export function clonePlan(plan: CutPlan): CutPlan {
 /** Drop points no step references (home is always kept). */
 export function prunePoints(plan: CutPlan): CutPlan {
   const used = new Set<string>([HOME]);
-  for (const s of plan.steps) if (s.kind === 'line') used.add(s.from).add(s.to);
+  for (const s of plan.steps) {
+    if (s.kind === 'line') used.add(s.from).add(s.to);
+    else if (s.kind === 'jog') used.add(s.to);
+  }
   const points = Object.fromEntries(Object.entries(plan.points).filter(([id]) => used.has(id)));
   return { ...plan, points };
 }

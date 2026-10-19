@@ -39,7 +39,7 @@ A profile can have more than one contour: the closed outer outline plus holes (s
 - **Sync**: every contour has its own splits, edited on the canvas as usual. Split numbers run on from one contour to the next.
   - A closed contour's first split is its start; click a split and choose *Make contour start* to move it.
   - An open contour has a fixed split at each end.
-- **Default plan**: the outline gets an extra split at the point nearest each other contour. The cut leaves the outline there, goes round the hole (or along the open line and back), and returns to the same split before carrying on round the outline. Edit it on *Sequence Cuts* like any plan.
+- **Sequencing**: each closed hole starts at its highest point. On *Sequence Cuts* the holes are normally cut first, plunged straight down from above the block (see below).
 - **Kerf side**, per contour, in the Kerf side table on *Segment Profiles*:
   - Closed contours: outside or inside. *Auto* is outside for the outline and inside for holes.
   - Open contours: left or right of the direction they were drawn in. *Auto* is none, so the wire runs on the line.
@@ -102,18 +102,27 @@ The **Transforms** section adjusts each profile without going back to CAD:
 
 The canvas shows each profile's chord line with LE/TE labels and a cross at the pivot.
 
-### Cut plan: run-outs, jogs and run-ins
+### Sequencing the cut
 
-By default the wire goes once around the whole profile (the **Loop** plan). It starts by jogging straight up from home to the height of the first split, then cuts straight across to it; at the end it cuts straight back out to home's X and jogs down. You can change that:
+*Sequence Cuts* starts empty, with each contour pair drawn in its pair colour. You build the sequence like a CAD feature tree:
 
-- **LE→TE top & bottom**: cuts the upper surface LE→TE, runs out, jogs back over the foam block, runs in, then cuts the lower surface LE→TE. Set the foam block outline first ("Fit block to part" works).
+- **Templates, one pair at a time**: pick a pair (its chip, or click it on the canvas), then a template. Its steps go in a folder named for the pair; applying another template to the same pair replaces that folder in place.
+  - **Holes** (*Loop*, *Loop (reverse)*): jog over the block to straight above the hole's start, cut straight down to it, round the hole, and straight back up. Open lines go along and back.
+  - **The outline** (*Loop*, *Loop (reverse)*, *LE→TE top & bottom*): straight up from home to the start's height and across to it; the reverse on the way out. LE→TE cuts the upper surface LE→TE, jogs back over the block, then the lower surface.
+- **Sequence all** does every hole first (front to back), then the outline, then a jog home.
+- **Jogs** start wherever the wire is, and by default go **over the block**: up to the jog clearance above the block, across, and down. So moving things around never leaves a gap. Click *over* on a jog step to make it a direct move.
+- **The step list is a tree**: drag steps and folders to reorder them, drop a step on a folder's name to put it in, and rename (double-click), un-folder (⇱) or delete folders.
+- **Rollback bar**: drag it up the list to see the cut only up to that point (2D, 3D and playback). Steps below it are greyed out. Export always writes the whole sequence.
+- **Insert at the bar**: *+ Jog to split* (then click a split marker), *+ Jog home*, *+ Cut line* (then click points; click a split to end there), *+ Segment* (then click a profile segment), *+ Folder*.
+- **Selecting** a step (in the list, or by clicking its path or segment on the canvas) draws it thick and bright and dims the rest.
 - **Click a split marker** to get these options:
   - *Run out from here*: click to place points, then click another split marker to run back in, or press Enter / double-click to stop.
   - *Out-and-back here*: for thin trailing edges and points; runs out past the point and straight back.
 - **Click a line** to switch it between cut and jog, insert a point, reverse it, or delete it.
 - **Drag** the round handles to move points. Shift-drag splits a point into separate root and tip ends.
-- The **step list** in the sidebar lets you reorder, reverse and delete steps.
-  - If the path jumps somewhere, a red gap row appears with *Bridge with jog / cut*. Export is blocked until every gap is closed.
+- If the path jumps somewhere, a red gap row appears with *Bridge with jog / cut*. Export is blocked until every gap is closed, and until every pair is sequenced.
+
+Projects saved before folders existed keep their old single loop until you apply a template.
 
 Jogs are sent as coordinated `G1` moves at the machine's jog speed. You get a warning if a jog passes through the foam block, a cut line stops inside it, or a segment is never cut (or is cut twice).
 

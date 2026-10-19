@@ -61,7 +61,11 @@ export function joinOffsetLoops(loops: OffsetLoop[]): OffsetLoop {
 const GAP_TOL = 1e-6;
 const same = (a: FacePt, b: FacePt) => dist(a.r, b.r) <= GAP_TOL && dist(a.t, b.t) <= GAP_TOL;
 
-export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Topo): WalkResult {
+/**
+ * Walk the plan. `safeY`: the safe jog height above the block (for 'above' points and jogs
+ * over the block); defaults to home's height.
+ */
+export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Topo, safeY = home.y): WalkResult {
   const { corners, bodies } = loop;
   const t = asTopology(topo ?? bodies.length);
   const n = t.segs;
@@ -84,6 +88,12 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Top
         return { r: p.p, t: p.p };
       case 'freePair':
         return { r: p.r, t: p.t };
+      case 'above': {
+        const c = corners[p.split];
+        if (!c) throw new Error(`Plan step ${i + 1} refers to split ${p.split + 1}, which doesn't exist.`);
+        const at = p.corner === 'last' ? c[c.length - 1] : c[0];
+        return { r: { x: at.r.x, y: safeY }, t: { x: at.t.x, y: safeY } };
+      }
       case 'level': {
         const c = corners[p.split];
         if (!c) throw new Error(`Plan step ${i + 1} refers to split ${p.split + 1}, which doesn't exist.`);
@@ -136,6 +146,20 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Top
       } else {
         startAt(body[0], i);
         push(body.slice(1), 'cut', i, false);
+      }
+    } else if (s.kind === 'jog') {
+      const to = resolve(s.to, i, 'to', cur);
+      const vertical = Math.abs(cur.r.x - to.r.x) < 1e-9 && Math.abs(cur.t.x - to.t.x) < 1e-9;
+      if (s.route === 'straight' || vertical) push([to], 'jog', i, true);
+      else {
+        // up to the safe height (never down to it), across, then down to the point, on both faces
+        const hr = Math.max(safeY, cur.r.y, to.r.y);
+        const ht = Math.max(safeY, cur.t.y, to.t.y);
+        const pts: FacePt[] = [];
+        if (cur.r.y < hr - 1e-9 || cur.t.y < ht - 1e-9) pts.push({ r: { x: cur.r.x, y: hr }, t: { x: cur.t.x, y: ht } });
+        pts.push({ r: { x: to.r.x, y: hr }, t: { x: to.t.x, y: ht } });
+        if (to.r.y < hr - 1e-9 || to.t.y < ht - 1e-9) pts.push(to);
+        push(pts, 'jog', i, true);
       }
     } else {
       const from = resolve(s.from, i, 'from', cur);

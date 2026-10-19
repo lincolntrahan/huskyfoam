@@ -412,7 +412,7 @@ Libraries:
 - Auto pairing: with equal counts of closed (and of open) inner contours, pair by order along the outline's long axis (then across it); otherwise by nearest normalised position.
 - Splits are linked unless `sync.linked[k] === false`; unlinked splits get a dashed ring. Pins are no longer offered (old projects keep theirs and can remove them).
 
-**M2f — Sequencing redesign** (planned)
+**M2f — Sequencing redesign** ✅ done (PR #14)
 
 *Goal*: Sequence Cuts becomes a feature tree you build pair by pair, like a CAD feature tree, instead of one global plan you edit after the fact.
 

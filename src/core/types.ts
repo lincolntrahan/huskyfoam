@@ -147,6 +147,11 @@ export interface JobSettings {
     /** Kerf side per pair; missing = automatic. */
     kerfSide: Record<number, KerfSide>;
   };
-  /** Cut plan; null = the default Loop template for however many segments the profiles have. */
+  /**
+   * Cut plan. New jobs start with an empty plan; null (projects from before sequencing folders)
+   * = the old default: one loop round the outline, entering each other contour from it.
+   */
   plan: CutPlan | null;
+  /** How far above the block (or the profiles, with no block) jogs over the block travel. */
+  jogClearance: number;
 }

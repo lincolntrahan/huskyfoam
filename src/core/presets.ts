@@ -34,5 +34,6 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     sync: null,
     contours: { pairs: null, sync: {}, kerfSide: {} },
     plan: null,
+    jogClearance: machine.units === 'mm' ? 12 : 0.5,
   };
 }
