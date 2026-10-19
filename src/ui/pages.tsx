@@ -186,6 +186,31 @@ export function TransformPage(c: PageCtx) {
   );
 }
 
+/**
+ * How high the block's bottom face sits above the floor (Y = 0): the shims to put under it.
+ * Nothing when no block size is set.
+ */
+function ShimCallout({ placed, units }: { placed: JobSettings; units: string }) {
+  const b = placed.block;
+  if (!(b.w > 0 && b.h > 0)) return null;
+  const y = Math.round(b.y * 1000) / 1000;
+  if (y < 0) {
+    return (
+      <div className="callout err">
+        The block would sit <strong>{-y} {units} below the floor</strong>, which it can't. Raise the height above floor, use a shorter block, or put
+        the profiles on the block's bottom face.
+      </div>
+    );
+  }
+  if (y === 0) return <div className="callout">The block sits straight on the floor: no shims needed.</div>;
+  return (
+    <div className="callout warn">
+      Shim the block up <strong>{y} {units}</strong>
+      <small>Its bottom face has to sit {y} {units} above the floor (Y = 0) for the cut to land where the preview shows.</small>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- 3. Place in machine
 const ALONG_WIRE = [
   { value: 'center', label: 'Profiles centred' },
@@ -308,6 +333,7 @@ export function SetupPage(c: PageCtx) {
             ? `Block X ${r3(placed.block.x)} to ${r3(placed.block.x + placed.block.w)}, Y ${r3(placed.block.y)} to ${r3(placed.block.y + placed.block.h)}; faces ${r3(placed.rootFaceFromLeft)} and ${r3(placed.rootFaceFromLeft + placed.span)} from the left carriage.`
             : 'Width or height 0 = no block: jog-through-foam checks are off.'}
         </small>
+        <ShimCallout placed={placed} units={u} />
       </section>
     </>
   );
@@ -575,6 +601,7 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
           No wire power is set for “{c.material.name}”. Add it in Place in Machine → Material → Edit…, or set the power by hand before cutting.
         </div>
       )}
+      <ShimCallout placed={c.placed} units={machine.units} />
       <section>
         <h2>Corner dwell</h2>
         <label className="check">

@@ -57,6 +57,7 @@ You only arrange the profiles relative to each other (on *Arrange Profiles*). Wh
   - along the chord: profiles centred, or against the −X or +X side;
   - vertically: profiles in the middle, on the bottom face, or against the top face.
 - *Fit block to profiles* sizes the block to just hold both profiles.
+- **Shims**: Place in Machine and Export say how far above the floor the block's bottom face has to sit, so you can shim it up (and warn if the settings would put it below the floor).
 
 ### 3D view
 

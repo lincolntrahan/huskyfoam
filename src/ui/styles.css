@@ -209,6 +209,9 @@ button.wide { width: 100%; margin-top: 4px; }
 .callout strong { font-size: 20px; color: var(--accent); }
 .callout small { color: var(--muted); font-size: 11px; }
 .callout.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.callout.warn strong { color: var(--warn); }
+.callout.err { border-color: var(--err); background: var(--err-bg); color: var(--err); font-size: 13px; }
+.callout.err strong { color: var(--err); font-size: 13px; }
 
 /* ---- DXF picker ---- */
 .pickers { display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
