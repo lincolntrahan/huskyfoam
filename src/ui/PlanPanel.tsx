@@ -6,7 +6,7 @@ interface Props {
   plan: CutPlan;
   result: CutResult;
   onChange: (p: CutPlan) => void;
-  onLoop: () => void;
+  onLoop: (reversed: boolean) => void;
   onLeTe: () => void;
   selected: number | null;
   onSelect: (i: number | null) => void;
@@ -61,8 +61,11 @@ export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, on
     <section>
       <h2>Cut plan</h2>
       <div className="row-buttons">
-        <button className={plan.template === 'loop' ? 'active' : ''} onClick={onLoop} title="Around the whole profile from the start point">
+        <button className={plan.template === 'loop' ? 'active' : ''} onClick={() => onLoop(false)} title="Around the whole profile from the start point">
           Loop
+        </button>
+        <button className={plan.template === 'loop-reverse' ? 'active' : ''} onClick={() => onLoop(true)} title="Around the whole profile the other way">
+          Loop (reverse)
         </button>
         <button className={plan.template === 'le-te' ? 'active' : ''} onClick={onLeTe} title="Upper surface LE→TE, jog back over the block, lower surface LE→TE">
           LE→TE top &amp; bottom

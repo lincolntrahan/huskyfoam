@@ -8,14 +8,18 @@ export interface Rect {
   h: number;
 }
 
-/** Home -> loop start -> every segment forward -> back to the start -> home. Same as M1. */
-export function loopPlan(n: number): CutPlan {
+/**
+ * Home -> loop start -> every segment -> back to the start -> home. Forward is the same as M1;
+ * reversed runs the loop the other way (all segments reversed, last first).
+ */
+export function loopPlan(n: number, reversed = false): CutPlan {
+  const segs = Array.from({ length: n }, (_, k): PlanStep => ({ id: `g${k + 1}`, kind: 'segment', seg: k, reversed }));
   const steps: PlanStep[] = [
     { id: 'l1', kind: 'line', from: HOME, to: splitId(0), speed: 'cut' },
-    ...Array.from({ length: n }, (_, k): PlanStep => ({ id: `g${k + 1}`, kind: 'segment', seg: k, reversed: false })),
+    ...(reversed ? segs.reverse() : segs),
     { id: 'l2', kind: 'line', from: splitId(0), to: HOME, speed: 'cut' },
   ];
-  return { points: { [HOME]: { kind: 'home' }, [splitId(0)]: { kind: 'split', split: 0 } }, steps, template: 'loop' };
+  return { points: { [HOME]: { kind: 'home' }, [splitId(0)]: { kind: 'split', split: 0 } }, steps, template: reversed ? 'loop-reverse' : 'loop' };
 }
 
 export interface LeTeInput {

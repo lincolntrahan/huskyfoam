@@ -38,7 +38,7 @@ function fitBlock(job: JobSettings, margin = 0.1) {
 
 const rootSplitPts = (job: JobSettings) => {
   const res = generateCut(root, tip, job, machine);
-  return res.rootSplits.map((i) => ({ x: root.pts[i].x + job.offset.x, y: root.pts[i].y + job.offset.y }));
+  return res.splitPts.root;
 };
 
 describe('Loop template', () => {
