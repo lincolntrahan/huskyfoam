@@ -75,7 +75,7 @@ export function TransformPanel({ value: t, onChange, units }: Props) {
             </button>
           )}
         </span>
-      ), 'Automatic LE/TE ignore straight tabs. To pick your own, click a split marker and choose “Use as LE/TE”.')}
+      ), 'Automatic LE/TE ignore straight tabs. To pick your own, click the profile outline on the canvas and choose “Use as LE / TE here”.')}
       {row('Scale', (side) => <NumInput value={t[side].scale} step={0.01} aria-label={`${side} scale`} onChange={(v) => set(side, { scale: v })} />)}
       {row(`Move X (${units})`, (side) => <NumInput value={t[side].move.x} step={0.05} aria-label={`${side} move x`} onChange={(v) => set(side, { move: { ...t[side].move, x: v } })} />)}
       {row(`Move Y (${units})`, (side) => <NumInput value={t[side].move.y} step={0.05} aria-label={`${side} move y`} onChange={(v) => set(side, { move: { ...t[side].move, y: v } })} />)}

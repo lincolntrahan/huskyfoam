@@ -9,7 +9,6 @@
   --tip: #ea7a12;
   --left: #16a34a;
   --right: #9333ea;
-  --wire: rgba(100, 109, 120, 0.35);
   --warn-bg: #fff7e6;
   --warn: #9a5b00;
   --err-bg: #fdecec;
@@ -30,7 +29,6 @@
     --tip: #f59e42;
     --left: #4ade80;
     --right: #c084fc;
-    --wire: rgba(152, 162, 173, 0.3);
     --warn-bg: #2d2412;
     --warn: #f3c46b;
     --err-bg: #2f1717;

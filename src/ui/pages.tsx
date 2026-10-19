@@ -41,6 +41,8 @@ export interface PageCtx {
   applyLeTe: () => void;
   baseName: string;
   setNotice: (s: string | null) => void;
+  /** Clear profiles and all job settings (asks first). */
+  resetProject: () => void;
 }
 
 function FileRow(props: { label: string; color: string; file: SourceFile | null; loaded: LoadedProfile | null; onLoad: (f: SourceFile) => void }) {
@@ -108,7 +110,12 @@ export function ImportPage(c: PageCtx) {
         <small className="hint">Load the root and tip outlines as DXF (e.g. exported from SolidWorks). Both need to be closed outlines.</small>
         <FileRow label="Root" color="var(--root)" file={c.rootFile} loaded={c.root} onLoad={c.loadRoot} />
         <FileRow label="Tip" color="var(--tip)" file={c.tipFile} loaded={c.tip} onLoad={c.loadTip} />
-        <button onClick={c.loadExample}>Load V-tail example</button>
+        <div className="row-buttons">
+          <button onClick={c.loadExample}>Load V-tail example</button>
+          <button className="danger" disabled={!c.rootFile && !c.tipFile} onClick={c.resetProject} title="Clear both profiles and every job setting (presets are kept)">
+            Reset project
+          </button>
+        </div>
       </section>
     </>
   );
