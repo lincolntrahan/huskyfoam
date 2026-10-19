@@ -96,7 +96,7 @@ The canvas shows each profile's chord line with LE/TE labels and a cross at the 
 
 ### Cut plan: run-outs, jogs and run-ins
 
-By default the wire goes once around the whole profile (the **Loop** plan). You can change that:
+By default the wire goes once around the whole profile (the **Loop** plan). It starts by jogging straight up from home to the height of the first split, then cuts straight across to it; at the end it cuts straight back out to home's X and jogs down. You can change that:
 
 - **LE→TE top & bottom**: cuts the upper surface LE→TE, runs out, jogs back over the foam block, runs in, then cuts the lower surface LE→TE. Set the foam block outline first ("Fit block to part" works).
 - **Click a split marker** to get these options:

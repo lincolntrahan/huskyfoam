@@ -351,7 +351,7 @@ Libraries:
 **M2a — Cut plan**: ✅ done (PR #1)
 - Plan model + walk (segments fwd/rev, line steps, shared points), replacing M1's waypoint lead-in
 - Foam block rectangle on the job; jog speed on the machine preset
-- Templates: Loop (default, M1-identical), LE→TE top & bottom, Out-and-back at a split
+- Templates: Loop (default; M1-identical until the M2c lead change), LE→TE top & bottom, Out-and-back at a split
 - Canvas editing: split-marker menu, click to place points, drag/Shift-drag, line cut/jog toggle; direction arrows
 - Step list: reorder, reverse, skip, cut/jog, gap rows with bridge fixes
 - Checks: gaps (block export), jog through block, cut ending in foam, uncut/repeated segments
@@ -391,6 +391,7 @@ Libraries:
 - Splits and pins can be **linked**: dragging one end keeps the other at the same relative position (a split within the stretch between its neighbours, a pin within its segment).
 
 *PR #10 — Multiple contours*
+- Default lead in / out: jog vertically from home to the start split's height, cut horizontally to it (and the reverse at the end), via a `level` plan point that follows split edits. Profile moves are unchanged; the M1 fixtures were regenerated for the new leads.
 - A profile is a list of contours: the outer outline (largest closed) first, then holes and open chains. Auto pick takes the outline and everything inside it.
 - Open contours: arc positions don't wrap; a split at each end (fixed); n splits make n-1 segments.
 - **Pairing**: root contour i is cut with tip contour `job.contours.pairs[i]` (-1 = not cut). Automatic pairing matches centroids normalised to each side's outline bounding box, closed with closed and open with open.

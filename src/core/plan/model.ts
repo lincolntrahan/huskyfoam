@@ -11,7 +11,13 @@ export type PlanPoint =
   /** Straight wire: same XY on both faces. */
   | { kind: 'free'; p: Vec2 }
   /** Unlocked: separate root and tip XY. */
-  | { kind: 'freePair'; r: Vec2; t: Vec2 };
+  | { kind: 'freePair'; r: Vec2; t: Vec2 }
+  /**
+   * Home's X at split k's height on each face: the corner of the default lead-in / lead-out
+   * (straight up from home, then across to the split). Follows the split when it moves.
+   * `corner: 'last'` levels with the far side of the split's kerf corner (reversed loops).
+   */
+  | { kind: 'level'; split: number; corner?: 'last' };
 
 export type Speed = 'cut' | 'jog';
 

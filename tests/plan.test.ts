@@ -7,6 +7,7 @@ import { loadDxfProfile } from '../src/core/io/loadProfile';
 import { bridgeGap, insertOutAndBack, insertPointOnLine, moveStep, removeStep, setSpeed } from '../src/core/plan/edit';
 import { HOME, splitId, type CutPlan } from '../src/core/plan/model';
 import { leTePlan, loopPlan } from '../src/core/plan/templates';
+import { remapRotate } from '../src/core/plan/remap';
 import { defaultJob, materials } from '../src/core/presets';
 import type { JobSettings } from '../src/core/types';
 
@@ -105,14 +106,14 @@ describe('checks', () => {
   it('flags a jog through the foam block', () => {
     const job = vtailJob();
     job.block = fitBlock(job);
-    const plan = setSpeed(loopPlan(8), 0, 'jog'); // home -> LE corner is inside the block
+    const plan = setSpeed(loopPlan(8), 1, 'jog'); // across into the LE corner runs through the block
     const res = generateCut(root, tip, { ...job, plan }, machine);
-    expect(res.warnings.some((w) => w.message.startsWith('Step 1 is a jog through the foam block'))).toBe(true);
+    expect(res.warnings.some((w) => w.message.startsWith('Step 2 is a jog through the foam block'))).toBe(true);
   });
 
   it('blocks export on a gap, and bridging fixes it', () => {
     const job = vtailJob();
-    const gapped = removeStep(loopPlan(8), 3); // drop segment 3
+    const gapped = removeStep(loopPlan(8), 4); // drop segment 3 (after the two lead-in lines)
     const bad = generateCut(root, tip, { ...job, plan: gapped }, machine);
     expect(bad.ok).toBe(false);
     expect(bad.gcode).toBe('');
@@ -176,16 +177,16 @@ describe('reversed segments', () => {
 
 describe('plan edits', () => {
   it('splits a line at a new point without changing the route ends', () => {
-    const p = insertPointOnLine(loopPlan(8), 0, { x: 1, y: 1 });
-    expect(p.steps).toHaveLength(11);
-    const [l1, l2] = p.steps as { from: string; to: string }[];
-    expect([l1.from, l1.to, l2.from, l2.to]).toEqual([HOME, 'p1', 'p1', splitId(0)]);
+    const p = insertPointOnLine(loopPlan(8), 1, { x: 1, y: 1 });
+    expect(p.steps).toHaveLength(13);
+    const [, l1, l2] = p.steps as { from: string; to: string }[];
+    expect([l1.from, l1.to, l2.from, l2.to]).toEqual(['lin', 'p1', 'p1', splitId(0)]);
     expect(p.template).toBe('custom');
   });
 
   it('moves steps up and down', () => {
-    const p = moveStep(loopPlan(8), 1, 1);
-    expect(p.steps.slice(1, 3).map((s) => (s.kind === 'segment' ? s.seg : -1))).toEqual([1, 0]);
+    const p = moveStep(loopPlan(8), 2, 1);
+    expect(p.steps.slice(2, 4).map((s) => (s.kind === 'segment' ? s.seg : -1))).toEqual([1, 0]);
   });
 });
 
@@ -206,5 +207,47 @@ describe('problem stages', () => {
       { pts: [{ x: 0, y: 1 }, { x: 0, y: 0 }], source: 'LINE' },
     ]).profile!;
     expect(generateCut(root, tri, job, machine).errorStages).toEqual(['segment']);
+  });
+});
+
+describe('default lead in / out', () => {
+  const job = vtailJob();
+  const res = generateCut(root, tip, job, machine);
+  const home = machine.home;
+  const leg = (i: number) => ({ from: res.path[i], to: res.path[i + 1] });
+
+  it('jogs straight up from home, then cuts straight across to the start', () => {
+    const up = leg(0);
+    expect(up.to.speed).toBe('jog');
+    expect(up.to.r.x).toBe(home.x);
+    expect(up.to.t.x).toBe(home.x);
+    const across = leg(1);
+    expect(across.to.speed).toBe('cut');
+    expect(across.to.r.y).toBe(up.to.r.y);
+    expect(across.to.t.y).toBe(up.to.t.y);
+  });
+
+  it('comes back the same way: across to home X, then down', () => {
+    const n = res.path.length;
+    const down = res.path[n - 1];
+    const corner = res.path[n - 2];
+    expect(down.speed).toBe('jog');
+    expect(corner.speed).toBe('cut');
+    expect(corner.r.x).toBe(home.x);
+    expect(corner.r.y).toBe(res.path[n - 3].r.y);
+    expect(down.r).toEqual(home);
+  });
+
+  it('stays level for the reversed loop too', () => {
+    const rev = generateCut(root, tip, { ...job, plan: loopPlan(8, true) }, machine);
+    expect(rev.errors).toEqual([]);
+    expect(rev.path[2].r.y).toBeCloseTo(rev.path[1].r.y, 12);
+    const n = rev.path.length;
+    expect(rev.path[n - 2].r.y).toBeCloseTo(rev.path[n - 3].r.y, 12);
+  });
+
+  it('follows the start split when the loop start moves', () => {
+    const plan = remapRotate(loopPlan(8), 3, 8);
+    expect(plan.points.lin).toEqual({ kind: 'level', split: 5 });
   });
 });

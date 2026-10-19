@@ -48,6 +48,8 @@ function describePoint(id: string, plan: CutPlan): string {
       return `(${fmt(p.p.x)}, ${fmt(p.p.y)})`;
     case 'freePair':
       return `root (${fmt(p.r.x)}, ${fmt(p.r.y)}) / tip (${fmt(p.t.x)}, ${fmt(p.t.y)})`;
+    case 'level':
+      return `home X at split ${p.split + 1} height`;
   }
 }
 

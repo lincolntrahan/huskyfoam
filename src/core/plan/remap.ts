@@ -11,6 +11,16 @@ function renameSplits(plan: CutPlan, mapSplit: (k: number) => number | null): Cu
   const rename = new Map<string, string>();
   const points: Record<string, PlanPoint> = {};
   for (const [id, p] of Object.entries(plan.points)) {
+    if (p.kind === 'level') {
+      // keeps its id; only the split it levels with is renumbered
+      const k = mapSplit(p.split);
+      if (k === null) {
+        if (plan.steps.some((s) => s.kind === 'line' && (s.from === id || s.to === id))) return null;
+        continue;
+      }
+      points[id] = { ...p, split: k };
+      continue;
+    }
     if (p.kind !== 'split') {
       points[id] = p;
       continue;

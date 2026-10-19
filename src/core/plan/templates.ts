@@ -17,8 +17,9 @@ export interface ContourEntry {
 }
 
 /**
- * Home -> loop start -> every segment -> back to the start -> home. Forward is the same as M1;
- * reversed runs the loop the other way (all segments reversed, last first).
+ * Home -> loop start -> every segment -> back to the start -> home. The lead in jogs straight up
+ * from home to the start's height and cuts across to it; the lead out mirrors it. Reversed runs
+ * the loop the other way (all segments reversed, last first).
  * With more contours, each `entries` contour is cut when the outer loop reaches its entry
  * split: a cut line in to its first split, all the way round it (an open contour: to its end
  * and back), and a cut line back out to the outer contour.
@@ -58,7 +59,10 @@ export function loopPlan(t: Topo, reversed = false, entries: ContourEntry[] = []
   // an open outer contour runs end to end: reversed, it starts at its last split
   const first = !outer.closed && reversed ? outer.split0 + outer.splits - 1 : outer.split0;
   const last = outer.closed ? outer.split0 : reversed ? outer.split0 : outer.split0 + outer.splits - 1;
-  line('home', first);
+  // lead in: jog straight up from home to the start split's height, then cut across to it
+  points.lin = { kind: 'level', split: first, ...(reversed ? { corner: 'last' as const } : {}) };
+  steps.push({ id: `l${++l}`, kind: 'line', from: HOME, to: 'lin', speed: 'jog' });
+  steps.push({ id: `l${++l}`, kind: 'line', from: 'lin', to: (points[splitId(first)] = { kind: 'split', split: first }, splitId(first)), speed: 'cut' });
   const outerSegs = Array.from({ length: outer.segs }, (_, j) => outer.seg0 + j);
   // contours are visited from the outer split the wire is at (each split once)
   visit(first);
@@ -74,7 +78,11 @@ export function loopPlan(t: Topo, reversed = false, entries: ContourEntry[] = []
       if (j !== first) visit(j);
     }
   }
-  line(last, 'home');
+  // lead out: cut straight across to home's X, then jog down to home
+  points.lout = { kind: 'level', split: last, ...(reversed ? { corner: 'last' as const } : {}) };
+  points[splitId(last)] = { kind: 'split', split: last };
+  steps.push({ id: `l${++l}`, kind: 'line', from: splitId(last), to: 'lout', speed: 'cut' });
+  steps.push({ id: `l${++l}`, kind: 'line', from: 'lout', to: HOME, speed: 'jog' });
   return { points, steps, template: reversed ? 'loop-reverse' : 'loop' };
 }
 

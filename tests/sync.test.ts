@@ -30,7 +30,8 @@ function vtailJob(): JobSettings {
   return job;
 }
 const run = (patch: Partial<JobSettings>) => generateCut(root, tip, { ...vtailJob(), ...patch }, machine);
-const loopMoves = (res: ReturnType<typeof run>) => [res.moves[0], ...res.moves.filter((m) => !m.lead)];
+// the profile loop: from where the lead in reaches the start split, without the leads
+const loopMoves = (res: ReturnType<typeof run>) => [res.moves[res.moves.findIndex((m) => !m.lead) - 1], ...res.moves.filter((m) => !m.lead)];
 const auto = autoSync(root, tip, 30);
 
 describe('arc positions', () => {

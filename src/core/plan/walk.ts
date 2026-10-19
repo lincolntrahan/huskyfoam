@@ -84,6 +84,12 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Top
         return { r: p.p, t: p.p };
       case 'freePair':
         return { r: p.r, t: p.t };
+      case 'level': {
+        const c = corners[p.split];
+        if (!c) throw new Error(`Plan step ${i + 1} refers to split ${p.split + 1}, which doesn't exist.`);
+        const at = p.corner === 'last' ? c[c.length - 1] : c[0];
+        return { r: { x: home.x, y: at.r.y }, t: { x: home.x, y: at.t.y } };
+      }
       case 'split': {
         const c = corners[p.split];
         if (!c) throw new Error(`Plan step ${i + 1} refers to split ${p.split + 1}, which doesn't exist.`);

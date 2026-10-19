@@ -74,7 +74,7 @@ describe('segment overrides', () => {
   it('a slower segment takes proportionally longer', () => {
     const base = run();
     const slow = run({ segmentOverrides: { 1: { speed: material.cutSpeed / 2 } } });
-    const seg1 = (r: ReturnType<typeof run>) => r.moves.filter((m) => m.step === 2).reduce((s, m) => s + m.minutes, 0); // step 2 = segment 1 in Loop
+    const seg1 = (r: ReturnType<typeof run>) => r.moves.filter((m) => m.step === 3).reduce((s, m) => s + m.minutes, 0); // step 3 = segment 1 in Loop (after the two lead-in lines)
     expect(seg1(slow)).toBeCloseTo(2 * seg1(base), 9);
   });
 
