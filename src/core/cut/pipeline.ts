@@ -4,8 +4,8 @@ import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
 import type { CutPlan } from '../plan/model';
 import { loopPlan, type Rect } from '../plan/templates';
 import { splitOffsetLoop, walkPlan, type Gap, type PathPt } from '../plan/walk';
-import { resamplePair } from '../sync/resample';
-import { autoSplits, defaultStart, segmentsFrom } from '../sync/segments';
+import { arcLoop, pointAtS } from '../geom/arc';
+import { autoSync, syncStations, type SyncSettings } from '../sync/sync';
 import type { JobSettings, MachinePreset } from '../types';
 import { offsetStations, type Station } from './kerf';
 
@@ -21,9 +21,12 @@ export interface CutResult {
   ok: boolean;
   errors: string[];
   warnings: CutWarning[];
-  /** Split indices into each profile's dense points, in loop order starting at the loop start. */
-  rootSplits: number[];
-  tipSplits: number[];
+  /** Sync that was used (job.sync, or the automatic one), in loop order from the loop start. */
+  sync: SyncSettings | null;
+  /** Positioned split points, in loop order (index = split number - 1). */
+  splitPts: { root: Vec2[]; tip: Vec2[] };
+  /** Positioned pin points. */
+  pinPts: { root: Vec2[]; tip: Vec2[] };
   /** Synced face stations before kerf (closed: last equals first). */
   stations: Station[];
   /** Kerf-offset face stations (closed). */
@@ -55,8 +58,9 @@ function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
     ok: false,
     errors,
     warnings,
-    rootSplits: [],
-    tipSplits: [],
+    sync: null,
+    splitPts: { root: [], tip: [] },
+    pinPts: { root: [], tip: [] },
     stations: [],
     kerfStations: [],
     plan: null,
@@ -67,11 +71,6 @@ function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
     gcode: '',
     stats: { cutMinutes: 0, maxCarriageSpeed: 0, segments: 0, moves: 0 },
   };
-}
-
-function ordered(splits: number[], start: number): number[] {
-  const k = splits.indexOf(start);
-  return [...splits.slice(k), ...splits.slice(0, k)];
 }
 
 const hasBlock = (b: Rect) => b.w > 0 && b.h > 0;
@@ -110,31 +109,26 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   if (job.span <= 0) return emptyResult(['Block span must be greater than zero.']);
   if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.']);
 
-  // 1. Splits and segments
-  const rs = autoSplits(root, job.cornerSplitDeg);
-  const ts = autoSplits(tip, job.cornerSplitDeg);
-  const r0 = defaultStart(root, rs);
-  const t0 = defaultStart(tip, ts);
-  const rootSplits = ordered(rs, r0);
-  const tipSplits = ordered(ts, t0);
-  if (rs.length !== ts.length) {
-    const res = emptyResult([
-      `Root has ${rs.length} segments but tip has ${ts.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities (or adjust the corner threshold).`,
-    ]);
-    res.rootSplits = rootSplits;
-    res.tipSplits = tipSplits;
-    return res;
+  // 1. Splits (sync points) on each profile
+  const rootArc = arcLoop(root);
+  const tipArc = arcLoop(tip);
+  const sync = job.sync ?? autoSync(root, tip, job.cornerSplitDeg);
+  const splitPts = { root: sync.root.map((s) => pointAtS(rootArc, s)), tip: sync.tip.map((s) => pointAtS(tipArc, s)) };
+  const pinPts = { root: sync.pins.map((p) => pointAtS(rootArc, p.root)), tip: sync.pins.map((p) => pointAtS(tipArc, p.tip)) };
+  if (sync.root.length !== sync.tip.length) {
+    return Object.assign(
+      emptyResult([
+        `Root has ${sync.root.length} segments but tip has ${sync.tip.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
+      ]),
+      { sync, splitPts, pinPts },
+    );
   }
-  const rSegs = segmentsFrom(root, rs, r0);
-  const tSegs = segmentsFrom(tip, ts, t0);
-  const n = rSegs.length;
+  const n = sync.root.length;
 
-  // 2. Resample each matched pair to equal counts
-  const stations: Station[] = [];
-  rSegs.forEach((rseg, k) => {
-    const { a, b } = resamplePair(rseg, tSegs[k], job.sampling);
-    for (let i = 0; i < a.length - 1; i++) stations.push({ r: a[i], t: b[i], seg: k, boundary: i === 0 });
-  });
+  // 2. Resample each matched pair (and pin spans) to equal counts
+  const synced = syncStations(rootArc, tipArc, sync, job.sampling);
+  const stations: Station[] = synced.stations;
+  warnings.push(...synced.warnings.map((message) => ({ message })));
 
   // 3. Kerf, on the full closed loop
   const kerfFor = (side: 'root' | 'tip') => (seg: number) => job.segmentKerf[seg] ?? job.kerf[side];
@@ -149,7 +143,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     walk = walkPlan(plan, splitOffsetLoop(kerfStations, n), home);
   } catch (e) {
     const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`]);
-    Object.assign(res, { rootSplits, tipSplits, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
+    Object.assign(res, { sync, splitPts, pinPts, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
     return res;
   }
   for (const g of walk.gaps) {
@@ -241,8 +235,9 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     ok,
     errors,
     warnings,
-    rootSplits,
-    tipSplits,
+    sync,
+    splitPts,
+    pinPts,
     stations: closeLoop(stations),
     kerfStations: closeLoop(kerfStations),
     plan,

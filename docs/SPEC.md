@@ -356,12 +356,32 @@ Libraries:
 - Step list: reorder, reverse, skip, cut/jog, gap rows with bridge fixes
 - Checks: gaps (block export), jog through block, cut ending in foam, uncut/repeated segments
 
-**M2b — Editing & presets**
-- Click/drag split editing, pins, loop start/direction
-- Transforms (twist/pivot, mirror L/R, move/scale, flip)
-- Per-segment kerf/speed overrides, auto-kerf from speed table, corner dwell
-- Machine editor + Material editor (local storage + "Export for repo"), preset pickers
-- Project save/open
+**M2b — Editing & presets** (three PRs, each merged before the next)
+
+*PR 1 — Sync editing*
+- Root / Tip / Both visibility toggle for every face-specific layer (profiles, kerf loop, plan paths, markers, unlocked handles, the matching carriage path).
+- Splits are stored as arc-length positions on each profile (`job.sync`, null = automatic). Edits:
+  - **Drag** a split along its own profile.
+  - **Add** a split by clicking a profile outline. The matching split is added automatically on the other profile at the same relative position within that segment, so the counts always match.
+  - **Remove** a split, which removes the pair.
+  - **Make loop start**.
+- **Pins**: numbered sync pairs inside a segment. They align root and tip stations (e.g. LE ↔ LE under twist) without creating segments. Add them like splits (auto-paired), drag them, remove them.
+- **Loop direction**: a "Loop (reverse)" template; it's all segments reversed, so kerf stays outward.
+- **Plan remap on split edits**:
+  - Moving a split keeps the plan.
+  - Adding a split turns that segment step into two steps (same direction).
+  - Removing a split merges two steps when they're consecutive in the plan; otherwise the plan resets to Loop with a warning.
+  - Changing the loop start renumbers segments and split references.
+
+*PR 2 — Transforms*
+- Twist/washout about a pivot. The default pivot is 25% chord, with LE, TE or a typed point as alternatives. The UI states clearly that this twist is **in addition to any twist already in the CAD profiles**, so most jobs won't need it.
+- Mirror L/R, move/scale, flip/rotate 180°.
+
+*PR 3 — Presets & projects*
+- Machine editor + Material editor (local storage + "Export for repo") and preset pickers.
+- The machine preset gets "G4 P is seconds / milliseconds" (default seconds, Mach3's default).
+- Per-segment kerf/speed overrides, auto-kerf from a speed table, corner dwell.
+- Project save/open (`.hfoam.json`).
 
 **M3 — Visualization & polish**
 - 3D view with playback

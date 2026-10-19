@@ -36,7 +36,7 @@ export interface CutPlan {
   /** Shared points; consecutive lines reference the same id, so dragging moves both. */
   points: Record<string, PlanPoint>;
   steps: PlanStep[];
-  template: 'loop' | 'le-te' | 'custom';
+  template: 'loop' | 'loop-reverse' | 'le-te' | 'custom';
 }
 
 export const HOME = 'home';

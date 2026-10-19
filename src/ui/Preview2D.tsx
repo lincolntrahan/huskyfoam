@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CutResult } from '../core/cut/pipeline';
+import { nearestS, type ArcLoop } from '../core/geom/arc';
 import type { Profile } from '../core/geom/profile';
 import { add, normalize, perpR, scale, sub, type Vec2 } from '../core/geom/vec';
 import { insertOutAndBack, insertPointOnLine, insertRunOut, removeStep, reverseStep, setPoint, setSpeed } from '../core/plan/edit';
 import type { CutPlan, PlanPoint } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
+import { addPin, addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, type Side, type SyncEdit } from '../core/sync/edit';
 import type { MachinePreset } from '../core/types';
+
+/** Which face(s) to draw: root, tip or both. */
+export type Sides = 'root' | 'tip' | 'both';
 
 export interface Layers {
   profiles: boolean;
@@ -29,6 +34,11 @@ interface Props {
   outBackDistance: number;
   selectedStep: number | null;
   onSelectStep: (i: number | null) => void;
+  sides: Sides;
+  rootSide: 'left' | 'right';
+  /** Arc-length views of the (unpositioned) profiles, for split and pin editing. */
+  arcs: { root: ArcLoop; tip: ArcLoop } | null;
+  onSyncChange: (e: SyncEdit) => void;
 }
 
 interface Box {
@@ -40,7 +50,9 @@ interface Box {
 
 type Menu =
   | { kind: 'split'; k: number; sx: number; sy: number }
-  | { kind: 'line'; step: number; at: Vec2; sx: number; sy: number };
+  | { kind: 'line'; step: number; at: Vec2; sx: number; sy: number }
+  | { kind: 'profile'; side: Side; s: number; sx: number; sy: number }
+  | { kind: 'pin'; i: number; sx: number; sy: number };
 
 interface Drawing {
   fromSplit: number;
@@ -88,6 +100,11 @@ const speedColor = (s: PathPt['speed']) => (s === 'jog' ? 'var(--jog)' : s === '
 
 export function Preview2D(props: Props) {
   const { root, tip, offset, result, machine, layers, block, plan, onPlanChange } = props;
+  const showR = props.sides !== 'tip';
+  const showT = props.sides !== 'root';
+  // The root face is driven by the carriage on its side.
+  const showLeft = props.rootSide === 'left' ? showR : showT;
+  const showRight = props.rootSide === 'left' ? showT : showR;
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const shiftPts = (p: Profile | null) => (p ? p.pts.map((q) => ({ x: q.x + offset.x, y: q.y + offset.y })) : []);
@@ -117,6 +134,8 @@ export function Preview2D(props: Props) {
   const [drawing, setDrawing] = useState<Drawing | null>(null);
   const pan = useRef<{ x: number; y: number; box: Box; moved: boolean } | null>(null);
   const pointDrag = useRef<{ id: string; role: 'p' | 'r' | 't' } | null>(null);
+  // Pressing a split or pin marker: a drag slides it along its profile, a plain click opens its menu.
+  const syncDrag = useRef<{ kind: 'split' | 'pin'; side: Side; i: number; x: number; y: number; moved: boolean } | null>(null);
 
   const toWorld = (clientX: number, clientY: number): Vec2 => {
     const svg = svgRef.current!;
@@ -191,49 +210,46 @@ export function Preview2D(props: Props) {
   }
 
   const unit = Math.max(vb.w, vb.h) / 100; // ~1% of the view, for marker and label sizes
-  const splitPos = (profile: Profile | null, splits: number[] | undefined, k: number): Vec2 | null => {
-    const idx = splits?.[k];
-    if (!profile || idx === undefined) return null;
-    return { x: profile.pts[idx].x + offset.x, y: profile.pts[idx].y + offset.y };
-  };
+  const splitPos = (side: Side, k: number): Vec2 | null => result?.splitPts[side][k] ?? null;
+  /** Arc position on a profile nearest to a world point (profiles are drawn shifted by the part offset). */
+  const sOnProfile = (side: Side, w: Vec2) => (props.arcs ? nearestS(props.arcs[side], { x: w.x - offset.x, y: w.y - offset.y }).s : 0);
+  const sync = result?.sync ?? null;
 
   const outAndBackAt = (k: number) => {
-    if (!plan || !result || !root || !tip) return;
-    const outward = (profile: Profile, splits: number[], side: 'r' | 't'): { from: Vec2; dir: Vec2 } => {
-      const from = splitPos(profile, splits, k)!;
+    if (!plan || !result) return;
+    const outward = (side: 'r' | 't'): { from: Vec2; dir: Vec2 } => {
+      const from = splitPos(side === 'r' ? 'root' : 'tip', k)!;
       const corner = result.kerfStations.filter((s) => s.corner && s.seg === k).map((s) => s[side]);
       const avg = corner.reduce((a, p) => add(a, scale(p, 1 / corner.length)), { x: 0, y: 0 });
       let dir = normalize(sub(avg, from));
       if (Math.hypot(dir.x, dir.y) < 0.5) {
-        const N = profile.pts.length;
-        const i = splits[k];
-        dir = normalize(perpR(sub(profile.pts[(i + 1) % N], profile.pts[(i - 1 + N) % N])));
+        // no kerf: use the profile normal from the neighbouring stations
+        const st = result.stations;
+        const m = st.length - 1; // closed loop repeats the first station
+        const i = st.findIndex((x) => x.boundary && x.seg === k);
+        dir = normalize(perpR(sub(st[(i + 1) % m][side], st[(i - 1 + m) % m][side])));
       }
       return { from, dir };
     };
-    const r = outward(root, result.rootSplits, 'r');
-    const t = outward(tip, result.tipSplits, 't');
+    const r = outward('r');
+    const t = outward('t');
     const d = props.outBackDistance;
     onPlanChange(insertOutAndBack(plan, k, { r: add(r.from, scale(r.dir, d)), t: add(t.from, scale(t.dir, d)) }, n));
   };
 
-  const onSplitClick = (k: number, e: React.MouseEvent) => {
+  const startSyncDrag = (kind: 'split' | 'pin', side: Side, i: number) => (e: React.PointerEvent) => {
     e.stopPropagation();
-    if (drawing) {
-      finishDrawing(k);
-      return;
-    }
-    setMenu({ kind: 'split', k, ...toWrap(e.clientX, e.clientY) });
+    syncDrag.current = { kind, side, i, x: e.clientX, y: e.clientY, moved: false };
+    capture(e.pointerId);
   };
 
-  const markers = (profile: Profile | null, splits: number[] | undefined, color: string, dy: number) =>
-    profile &&
-    splits?.map((idx, k) => {
-      const p = profile.pts[idx];
-      const x = p.x + offset.x;
-      const y = -(p.y + offset.y);
+  const markers = (side: Side, color: string, dy: number) =>
+    result?.splitPts[side].map((p, k) => {
+      const x = p.x;
+      const y = -p.y;
       return (
-        <g key={`${color}-${k}`} className="clickable" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => onSplitClick(k, e)}>
+        <g key={`${color}-${k}`} className="clickable" onPointerDown={startSyncDrag('split', side, k)}>
+          <title>{`Split ${k + 1}: click for options, drag to slide along the profile`}</title>
           <circle cx={x} cy={y} r={unit * 1.2} fill="transparent" />
           <circle cx={x} cy={y} r={unit * (k === 0 ? 0.9 : 0.55)} fill={k === 0 ? color : 'var(--canvas)'} stroke={color} strokeWidth={unit * 0.2} />
           <text x={x + unit * 0.9} y={y + dy * unit} fontSize={unit * 1.6} fill={color}>
@@ -243,9 +259,30 @@ export function Preview2D(props: Props) {
       );
     });
 
+  const pins = (side: Side, dy: number) =>
+    result?.pinPts[side].map((p, i) => {
+      const r = unit * 0.75;
+      return (
+        <g key={`pin-${side}-${i}`} className="clickable" onPointerDown={startSyncDrag('pin', side, i)}>
+          <title>{`Pin ${i + 1}: click for options, drag to slide along the profile`}</title>
+          <circle cx={p.x} cy={-p.y} r={unit * 1.2} fill="transparent" />
+          <rect x={p.x - r / 2} y={-p.y - r / 2} width={r} height={r} transform={`rotate(45 ${p.x} ${-p.y})`} fill="var(--pin)" />
+          <text x={p.x + unit * 0.9} y={-p.y + dy * unit} fontSize={unit * 1.4} fill="var(--pin)">
+            P{i + 1}
+          </text>
+        </g>
+      );
+    });
+
+  const profileClick = (side: Side, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!props.arcs) return;
+    setMenu({ kind: 'profile', side, s: sOnProfile(side, toWorld(e.clientX, e.clientY)), ...toWrap(e.clientX, e.clientY) });
+  };
+
   const wireLines = (() => {
     const ks = result?.kerfStations ?? [];
-    if (!layers.wires || ks.length < 2) return [];
+    if (!layers.wires || !showR || !showT || ks.length < 2) return [];
     const every = Math.max(1, Math.floor(ks.length / 90));
     return ks.filter((s, i) => i % every === 0 || s.boundary);
   })();
@@ -279,14 +316,14 @@ export function Preview2D(props: Props) {
           if (p.kind === 'freePair')
             return [
               <line key={`${id}-link`} x1={p.r.x} y1={-p.r.y} x2={p.t.x} y2={-p.t.y} stroke="var(--muted)" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />,
-              h('r', p.r, 'var(--root)'),
-              h('t', p.t, 'var(--tip)'),
+              ...(showR ? [h('r', p.r, 'var(--root)')] : []),
+              ...(showT ? [h('t', p.t, 'var(--tip)')] : []),
             ];
           return [];
         })
       : [];
 
-  const lastDrawPt = drawing ? (drawing.pts[drawing.pts.length - 1] ?? splitPos(root, result?.rootSplits, drawing.fromSplit)) : null;
+  const lastDrawPt = drawing ? (drawing.pts[drawing.pts.length - 1] ?? splitPos('root', drawing.fromSplit)) : null;
 
   const [tx0, tx1] = machine.travel.x;
   const [ty0, ty1] = machine.travel.y;
@@ -313,6 +350,18 @@ export function Preview2D(props: Props) {
           capture(e.pointerId);
         }}
         onPointerMove={(e) => {
+          const sd = syncDrag.current;
+          if (sd) {
+            if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
+            sd.moved = true;
+            if (!sync || !props.arcs || drawing) return;
+            const sNew = sOnProfile(sd.side, toWorld(e.clientX, e.clientY));
+            if (sd.kind === 'split') {
+              const ed = moveSplit(sync, plan, props.arcs, sd.side, sd.i, sNew);
+              if (ed) props.onSyncChange(ed);
+            } else props.onSyncChange({ sync: movePin(sync, props.arcs, sd.i, sd.side, sNew), plan });
+            return;
+          }
           const pd = pointDrag.current;
           if (pd && plan) {
             const w = toWorld(e.clientX, e.clientY);
@@ -331,6 +380,15 @@ export function Preview2D(props: Props) {
           } else if (drawing) setDrawing({ ...drawing, cursor: toWorld(e.clientX, e.clientY) });
         }}
         onPointerUp={(e) => {
+          const sd = syncDrag.current;
+          if (sd) {
+            syncDrag.current = null;
+            if (sd.moved) return;
+            if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
+            else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, ...toWrap(e.clientX, e.clientY) });
+            else setMenu({ kind: 'pin', i: sd.i, ...toWrap(e.clientX, e.clientY) });
+            return;
+          }
           if (pointDrag.current) {
             pointDrag.current = null;
             return;
@@ -362,8 +420,8 @@ export function Preview2D(props: Props) {
           {layers.carriages && (
             <>
               <rect x={tx0} y={-ty1} width={tx1 - tx0} height={ty1 - ty0} stroke="var(--muted)" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" strokeWidth={1} />
-              <polyline points={pts(carriage.left)} stroke="var(--left)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
-              <polyline points={pts(carriage.right)} stroke="var(--right)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+              {showLeft && <polyline points={pts(carriage.left)} stroke="var(--left)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
+              {showRight && <polyline points={pts(carriage.right)} stroke="var(--right)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
             </>
           )}
           {wireLines.map((s, i) => (
@@ -371,14 +429,14 @@ export function Preview2D(props: Props) {
           ))}
           {layers.profiles && (
             <>
-              <polygon points={pts(rootPts)} stroke="var(--root)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-              <polygon points={pts(tipPts)} stroke="var(--tip)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+              {showR && <polygon points={pts(rootPts)} stroke="var(--root)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+              {showT && <polygon points={pts(tipPts)} stroke="var(--tip)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
             </>
           )}
           {layers.kerf && result && result.kerfStations.length > 0 && (
             <>
-              <polyline points={pts(result.kerfStations.map((s) => s.r))} stroke="var(--root)" strokeDasharray="5 3" strokeWidth={0.8} opacity={0.6} vectorEffect="non-scaling-stroke" />
-              <polyline points={pts(result.kerfStations.map((s) => s.t))} stroke="var(--tip)" strokeDasharray="5 3" strokeWidth={0.8} opacity={0.6} vectorEffect="non-scaling-stroke" />
+              {showR && <polyline points={pts(result.kerfStations.map((s) => s.r))} stroke="var(--root)" strokeDasharray="5 3" strokeWidth={0.8} opacity={0.6} vectorEffect="non-scaling-stroke" />}
+              {showT && <polyline points={pts(result.kerfStations.map((s) => s.t))} stroke="var(--tip)" strokeDasharray="5 3" strokeWidth={0.8} opacity={0.6} vectorEffect="non-scaling-stroke" />}
             </>
           )}
           {layers.plan &&
@@ -387,7 +445,8 @@ export function Preview2D(props: Props) {
               const sel = props.selectedStep === run.step;
               const dash = run.speed === 'cut' ? undefined : '6 4';
               const width = sel ? 3.5 : 2;
-              const mid = Math.floor((run.r.length - 1) / 2);
+              const main = showR ? run.r : run.t;
+              const mid = Math.floor((main.length - 1) / 2);
               const arrow = run.speed === 'gap' ? undefined : `url(#arrow-${run.speed})`;
               const clickLine = (e: React.MouseEvent) => {
                 e.stopPropagation();
@@ -397,13 +456,13 @@ export function Preview2D(props: Props) {
               };
               return (
                 <g key={i}>
-                  <polyline points={pts(run.t)} stroke={color} strokeWidth={width * 0.6} strokeDasharray={dash} opacity={0.55} vectorEffect="non-scaling-stroke" />
-                  <polyline points={pts(run.r)} stroke={color} strokeWidth={width} strokeDasharray={dash} vectorEffect="non-scaling-stroke" />
-                  {arrow && run.r.length >= 2 && <polyline points={pts([run.r[mid], run.r[mid + 1]])} stroke="none" markerEnd={arrow} />}
-                  <polyline className="clickable" points={pts(run.r)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />
-                  <polyline className="clickable" points={pts(run.t)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />
+                  {showR && showT && <polyline points={pts(run.t)} stroke={color} strokeWidth={width * 0.6} strokeDasharray={dash} opacity={0.55} vectorEffect="non-scaling-stroke" />}
+                  <polyline points={pts(main)} stroke={color} strokeWidth={width} strokeDasharray={dash} vectorEffect="non-scaling-stroke" />
+                  {arrow && main.length >= 2 && <polyline points={pts([main[mid], main[mid + 1]])} stroke="none" markerEnd={arrow} />}
+                  {showR && <polyline className="clickable" points={pts(run.r)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />}
+                  {showT && <polyline className="clickable" points={pts(run.t)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />}
                   {run.step >= 0 && run.speed !== 'gap' && (
-                    <text x={run.r[mid].x} y={-run.r[mid].y - unit * 0.8} fontSize={unit * 1.3} fill={color} stroke="none" textAnchor="middle">
+                    <text x={main[mid].x} y={-main[mid].y - unit * 0.8} fontSize={unit * 1.3} fill={color} stroke="none" textAnchor="middle">
                       {run.step + 1}
                     </text>
                   )}
@@ -412,7 +471,7 @@ export function Preview2D(props: Props) {
             })}
           {drawing && lastDrawPt && (
             <polyline
-              points={pts([splitPos(root, result?.rootSplits, drawing.fromSplit)!, ...drawing.pts, ...(drawing.cursor ? [drawing.cursor] : [])])}
+              points={pts([splitPos('root', drawing.fromSplit)!, ...drawing.pts, ...(drawing.cursor ? [drawing.cursor] : [])])}
               stroke="var(--cut)"
               strokeDasharray="3 3"
               strokeWidth={1.5}
@@ -420,8 +479,30 @@ export function Preview2D(props: Props) {
             />
           )}
         </g>
-        {result && markers(root, result.rootSplits, 'var(--root)', -0.6)}
-        {result && markers(tip, result.tipSplits, 'var(--tip)', 2)}
+        {layers.profiles && props.arcs && !drawing && (
+          <g fill="none">
+            {showR && (
+              <polygon className="clickable" points={pts(rootPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('root', e)}>
+                <title>Click to add a split or pin</title>
+              </polygon>
+            )}
+            {showT && (
+              <polygon className="clickable" points={pts(tipPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('tip', e)}>
+                <title>Click to add a split or pin</title>
+              </polygon>
+            )}
+          </g>
+        )}
+        {result &&
+          showR &&
+          showT &&
+          result.pinPts.root.map((p, i) => (
+            <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          ))}
+        {result && showR && pins('root', -0.6)}
+        {result && showT && pins('tip', 2)}
+        {result && showR && markers('root', 'var(--root)', -0.6)}
+        {result && showT && markers('tip', 'var(--tip)', 2)}
         {handles}
       </svg>
 
@@ -439,6 +520,34 @@ export function Preview2D(props: Props) {
               <div className="popover-title">Split {menu.k + 1}</div>
               {menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
               {menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
+              {sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
+              {sync &&
+                sync.root.length > 1 &&
+                menuItem('Remove split (both profiles)', () => {
+                  const ed = removeSplit(sync, plan, menu.k);
+                  if (ed) props.onSyncChange(ed);
+                })}
+            </>
+          ) : menu.kind === 'profile' ? (
+            <>
+              <div className="popover-title">{menu.side === 'root' ? 'Root' : 'Tip'} profile</div>
+              {sync &&
+                props.arcs &&
+                menuItem('Add split here (+ matching one on the other profile)', () => {
+                  const ed = addSplit(sync, plan, props.arcs!, menu.side, menu.s);
+                  if (ed) props.onSyncChange(ed);
+                })}
+              {sync &&
+                props.arcs &&
+                menuItem('Add pin here (+ matching one on the other profile)', () => {
+                  const next = addPin(sync, props.arcs!, menu.side, menu.s);
+                  if (next) props.onSyncChange({ sync: next, plan });
+                })}
+            </>
+          ) : menu.kind === 'pin' ? (
+            <>
+              <div className="popover-title">Pin {menu.i + 1}</div>
+              {sync && menuItem('Remove pin', () => props.onSyncChange({ sync: removePin(sync, menu.i), plan }))}
             </>
           ) : (
             (() => {

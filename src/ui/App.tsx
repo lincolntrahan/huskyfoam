@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
+import { arcLoop } from '../core/geom/arc';
+import type { SyncEdit } from '../core/sync/edit';
 import type { Profile } from '../core/geom/profile';
 import { loadDxfProfile } from '../core/io/loadProfile';
 import type { CutPlan } from '../core/plan/model';
@@ -10,7 +12,7 @@ import exampleRoot from '../../tests/fixtures/vtail-root.dxf?raw';
 import exampleTip from '../../tests/fixtures/vtail-tip.dxf?raw';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel } from './PlanPanel';
-import { Preview2D, type Layers } from './Preview2D';
+import { Preview2D, type Layers, type Sides } from './Preview2D';
 
 interface SourceFile {
   name: string;
@@ -74,6 +76,7 @@ export function App() {
   const [rootFile, setRootFile] = useState<SourceFile | null>(null);
   const [tipFile, setTipFile] = useState<SourceFile | null>(null);
   const [layers, setLayers] = useState<Layers>({ profiles: true, kerf: true, plan: true, wires: true, carriages: false });
+  const [sides, setSides] = useState<Sides>('both');
   const [clearance, setClearance] = useState(0.5);
   const [outBack, setOutBack] = useState(1);
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
@@ -82,6 +85,15 @@ export function App() {
 
   const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units) : null), [rootFile, machine.units]);
   const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units) : null), [tipFile, machine.units]);
+  const arcs = useMemo(
+    () => (root?.profile && tip?.profile ? { root: arcLoop(root.profile), tip: arcLoop(tip.profile) } : null),
+    [root, tip],
+  );
+  const [notice, setNotice] = useState<string | null>(null);
+  const onSyncChange = (e: SyncEdit) => {
+    patch({ sync: e.sync, plan: e.plan });
+    setNotice(e.note ?? null);
+  };
   const result = useMemo(
     () => (root?.profile && tip?.profile ? generateCut(root.profile, tip.profile, job, machine) : null),
     [root, tip, job, machine],
@@ -114,6 +126,7 @@ export function App() {
       kerf: { root: 0.0998, tip: 0.1116 },
       offset,
       block: fitBlock([rootLoaded, tipLoaded], offset, 0.1),
+      sync: null,
       plan: null,
     });
   };
@@ -121,7 +134,7 @@ export function App() {
   const applyLeTe = () => {
     if (!result || !root?.profile) return;
     const block = blockOrFit();
-    const splits = result.rootSplits.map((i) => ({ x: root.profile!.pts[i].x + job.offset.x, y: root.profile!.pts[i].y + job.offset.y }));
+    const splits = result.splitPts.root;
     setSelectedStep(null);
     patch({ block, plan: leTePlan({ splits, block, clearance }) });
   };
@@ -166,8 +179,8 @@ export function App() {
         <aside className="sidebar">
           <section>
             <h2>Profiles</h2>
-            <FileRow label="Root" color="var(--root)" file={rootFile} onLoad={(f) => { setRootFile(f); patch({ plan: null }); }} />
-            <FileRow label="Tip" color="var(--tip)" file={tipFile} onLoad={(f) => { setTipFile(f); patch({ plan: null }); }} />
+            <FileRow label="Root" color="var(--root)" file={rootFile} onLoad={(f) => { setRootFile(f); patch({ plan: null, sync: null }); }} />
+            <FileRow label="Tip" color="var(--tip)" file={tipFile} onLoad={(f) => { setTipFile(f); patch({ plan: null, sync: null }); }} />
             <button onClick={loadExample}>Load V-tail example</button>
           </section>
 
@@ -195,7 +208,7 @@ export function App() {
           </section>
 
           {plan && result && (
-            <PlanPanel plan={plan} result={result} onChange={setPlan} onLoop={() => patch({ plan: loopPlan(result.stats.segments) })} onLeTe={applyLeTe} selected={selectedStep} onSelect={setSelectedStep} />
+            <PlanPanel plan={plan} result={result} onChange={setPlan} onLoop={(reversed) => patch({ plan: loopPlan(result.stats.segments, reversed) })} onLeTe={applyLeTe} selected={selectedStep} onSelect={setSelectedStep} />
           )}
           <section>
             <NumberField label={`Template clearance (${u})`} value={clearance} min={0} onChange={setClearance} hint="How far outside the block the LE→TE template puts run-in/out and jog points" />
@@ -228,7 +241,18 @@ export function App() {
                 <NumberField label={`Max step (${u})`} value={job.sampling.maxStep} min={0.001} onChange={(v) => v > 0 && patch({ sampling: { ...job.sampling, maxStep: v } })} />
               </>
             )}
-            <NumberField label="Corner split angle (°)" value={job.cornerSplitDeg} min={1} onChange={(v) => patch({ cornerSplitDeg: v, plan: null })} hint="Corners sharper than this become sync points, in addition to entity boundaries. Changing it resets the plan." />
+            <NumberField label="Corner split angle (°)" value={job.cornerSplitDeg} min={1} onChange={(v) => patch({ cornerSplitDeg: v, sync: null, plan: null })} hint="Corners sharper than this become automatic splits, in addition to entity boundaries. Changing it resets splits, pins and the plan." />
+          </section>
+
+          <section>
+            <h2>Sync points</h2>
+            <small className="hint">
+              Click a profile outline to add a split or a pin (the matching one is added on the other profile). Drag markers to slide them; click one
+              for more options. {job.sync ? 'Splits are edited by hand.' : 'Splits are automatic.'}
+            </small>
+            <button disabled={!job.sync} onClick={() => { patch({ sync: null, plan: null }); setNotice(null); }}>
+              Reset splits &amp; pins to automatic
+            </button>
           </section>
         </aside>
 
@@ -245,10 +269,27 @@ export function App() {
               plan={plan}
               onPlanChange={setPlan}
               outBackDistance={outBack}
+              arcs={arcs}
+              onSyncChange={onSyncChange}
               selectedStep={selectedStep}
               onSelectStep={setSelectedStep}
+              sides={sides}
+              rootSide={job.rootSide}
             />
             <div className="layers">
+              <div className="segmented" role="group" aria-label="Which face to show">
+                {(
+                  [
+                    ['root', `Root (${job.rootSide === 'left' ? 'left' : 'right'})`],
+                    ['tip', `Tip (${job.rootSide === 'left' ? 'right' : 'left'})`],
+                    ['both', 'Both'],
+                  ] as [Sides, string][]
+                ).map(([k, label]) => (
+                  <button key={k} className={sides === k ? 'active' : ''} aria-pressed={sides === k} onClick={() => setSides(k)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
               {(
                 [
                   ['profiles', 'Profiles'],
@@ -284,6 +325,11 @@ export function App() {
             )}
             {!result && !importWarnings.length && <div className="stats">No cut yet.</div>}
             {result?.errors.map((e, i) => <div key={`e${i}`} className="msg err">{e}</div>)}
+            {notice && (
+              <div className="msg info">
+                {notice} <button onClick={() => setNotice(null)}>OK</button>
+              </div>
+            )}
             {[...importWarnings, ...(result?.warnings.map((w) => w.message) ?? [])].map((w, i) => (
               <div key={`w${i}`} className="msg warn">{w}</div>
             ))}

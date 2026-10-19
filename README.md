@@ -16,6 +16,20 @@ Everything runs in the browser, so files never leave your computer. See [docs/SP
 
 Preview controls: scroll to zoom, drag to pan, double-click to re-fit.
 
+### Sync points: splits and pins
+
+Splits are where root and tip are matched (segment N on the root is cut with segment N on the tip). They start out automatic (entity boundaries + sharp corners) and you can edit them:
+
+- **Click a profile outline** to *add a split* or *add a pin*. The matching one is added on the other profile at the same relative position.
+- **Drag** a split or pin marker to slide it along its own profile.
+- **Click a split** for *Make loop start* or *Remove split* (removes the pair).
+- **Pins** (purple diamonds) line up a root point with a tip point inside a segment (e.g. LE to LE) without creating a new segment.
+- *Reset splits & pins to automatic* undoes all of it.
+
+When splits change, a custom cut plan is carried over where possible. If it can't be, it resets to Loop and tells you.
+
+The **Root / Tip / Both** switch on the canvas shows one face at a time (profile, kerf, plan, markers and that side's carriage path).
+
 ### Cut plan: run-outs, jogs and run-ins
 
 By default the wire goes once around the whole profile (the **Loop** plan). You can change that:
