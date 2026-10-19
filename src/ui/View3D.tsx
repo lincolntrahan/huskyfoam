@@ -6,6 +6,7 @@ import { profilePlanes, type CutResult } from '../core/cut/pipeline';
 import type { Vec2 } from '../core/geom/vec';
 import { buildTimeline, stateAt } from '../core/sim/timeline';
 import type { JobSettings, MachinePreset } from '../core/types';
+import type { StepId } from './steps';
 
 /**
  * 3D view of the job: machine (carriage planes + travel), foam block, profiles on their planes,
@@ -33,6 +34,13 @@ const FILTER_LABELS: [keyof Filters3D, string][] = [
 ];
 
 const SPEEDS = [1, 5, 20, 100];
+
+/** What each job page shows in 3D (the Import page has no 3D view). */
+function allowedFor(mode: StepId): Filters3D {
+  const cut = mode === 'preview' || mode === 'export';
+  const profiles = cut || mode === 'transform' || mode === 'segment' || mode === 'sequence';
+  return { machine: true, block: true, profiles, surface: cut, wire: cut, carriages: cut };
+}
 
 function cssColor(name: string, fallback: string): string {
   if (typeof document === 'undefined') return fallback;
@@ -63,17 +71,20 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
   const D = machine.carriageSpacing;
   const colors = useMemo(
     () => ({
-      root: cssColor('--root', '#2563eb'),
-      tip: cssColor('--tip', '#ea7a12'),
-      left: cssColor('--left', '#16a34a'),
-      right: cssColor('--right', '#9333ea'),
-      cut: cssColor('--cut', '#dc2626'),
-      muted: cssColor('--muted', '#646d78'),
-      block: cssColor('--block-edge', '#ca8a04'),
+      root: cssColor('--root', '#2f7bff'),
+      tip: cssColor('--tip', '#ff2d2d'),
+      rootcar: cssColor('--rootcar', '#00e65c'),
+      tipcar: cssColor('--tipcar', '#b84dff'),
+      cut: cssColor('--cut', '#ffd400'),
+      muted: cssColor('--muted', '#b4b4bc'),
+      block: cssColor('--block-edge', '#ff9100'),
     }),
     [],
   );
   const { zr, zt } = profilePlanes(job);
+  // the root-side carriage is green, the tip-side one purple
+  const leftColor = job.rootSide === 'left' ? colors.rootcar : colors.tipcar;
+  const rightColor = job.rootSide === 'left' ? colors.tipcar : colors.rootcar;
   // block faces along the wire
   const zb0 = job.rootFaceFromLeft;
   const zb1 = job.rootFaceFromLeft + job.span;
@@ -141,8 +152,8 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
 
       {filters.machine && (
         <group>
-          <Line points={frame(0)} color={colors.left} lineWidth={1} />
-          <Line points={frame(D)} color={colors.right} lineWidth={1} />
+          <Line points={frame(0)} color={leftColor} lineWidth={1} />
+          <Line points={frame(D)} color={rightColor} lineWidth={1} />
           {[
             [tx0, ty0],
             [tx1, ty0],
@@ -178,19 +189,19 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
         </mesh>
       )}
 
-      {leftPath && <Line points={leftPath} color={colors.left} lineWidth={1.5} />}
-      {rightPath && <Line points={rightPath} color={colors.right} lineWidth={1.5} />}
+      {leftPath && <Line points={leftPath} color={leftColor} lineWidth={1.5} />}
+      {rightPath && <Line points={rightPath} color={rightColor} lineWidth={1.5} />}
 
       {filters.wire && (
         <group>
           <Line points={[v3(sim.left, 0), v3(sim.right, D)]} color={colors.cut} lineWidth={3} />
           <mesh position={v3(sim.left, 0)}>
             <sphereGeometry args={[D * 0.006, 16, 16]} />
-            <meshStandardMaterial color={colors.left} />
+            <meshStandardMaterial color={leftColor} />
           </mesh>
           <mesh position={v3(sim.right, D)}>
             <sphereGeometry args={[D * 0.006, 16, 16]} />
-            <meshStandardMaterial color={colors.right} />
+            <meshStandardMaterial color={rightColor} />
           </mesh>
         </group>
       )}
@@ -198,9 +209,12 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
   );
 }
 
-export default function View3D(props: { result: CutResult | null; job: JobSettings; machine: MachinePreset }) {
+export default function View3D(props: { result: CutResult | null; job: JobSettings; machine: MachinePreset; mode: StepId }) {
   const { result, job, machine } = props;
-  const [filters, setFilters] = useState<Filters3D>({ machine: true, block: true, profiles: true, surface: true, wire: true, carriages: true });
+  const [chosen, setFilters] = useState<Filters3D>({ machine: true, block: true, profiles: true, surface: true, wire: true, carriages: true });
+  const allowed = allowedFor(props.mode);
+  const filters = Object.fromEntries((Object.keys(chosen) as (keyof Filters3D)[]).map((k) => [k, chosen[k] && allowed[k]])) as unknown as Filters3D;
+  const canPlay = props.mode === 'preview' || props.mode === 'export';
   const timeline = useMemo(() => (result ? buildTimeline(result.moves) : null), [result]);
   const total = timeline?.total ?? 0;
   const [time, setTime] = useState(total);
@@ -214,11 +228,18 @@ export default function View3D(props: { result: CutResult | null; job: JobSettin
   useEffect(() => {
     if (playing && time >= total) setPlaying(false);
   }, [playing, time, total]);
+  // pages without playback always show the finished state
+  useEffect(() => {
+    if (!canPlay) {
+      setPlaying(false);
+      setTime(total);
+    }
+  }, [canPlay, total]);
 
-  if (!result || !result.moves.length) {
+  if (!result) {
     return (
       <div className="canvas-wrap">
-        <div className="empty">The 3D view needs a complete cut. Load both profiles and fix any problems first.</div>
+        <div className="empty">Load both profiles to see the job in 3D.</div>
       </div>
     );
   }
@@ -239,19 +260,20 @@ export default function View3D(props: { result: CutResult | null; job: JobSettin
   return (
     <div className="canvas-wrap view3d">
       <Canvas camera={{ position: [center[0] + size * 0.75, center[1] + size * 0.55, center[2] - size * 1.0], fov: 40, near: size / 1000, far: size * 50 }}>
-        <Scene result={result} job={job} machine={machine} filters={filters} time={time} playing={playing} speed={speed} onTime={setTime} total={total} />
+        <Scene result={result} job={job} machine={machine} filters={filters} time={canPlay ? time : total} playing={canPlay && playing} speed={speed} onTime={setTime} total={total} />
         <OrbitControls makeDefault target={center} />
       </Canvas>
 
       <div className="layers">
-        {FILTER_LABELS.map(([k, label]) => (
+        {FILTER_LABELS.filter(([k]) => allowed[k]).map(([k, label]) => (
           <label key={k}>
-            <input type="checkbox" checked={filters[k]} onChange={(e) => setFilters({ ...filters, [k]: e.target.checked })} />
+            <input type="checkbox" checked={chosen[k]} onChange={(e) => setFilters({ ...chosen, [k]: e.target.checked })} />
             {label}
           </label>
         ))}
       </div>
 
+      {canPlay && (
       <div className="playback">
         <button
           className="primary"
@@ -289,7 +311,8 @@ export default function View3D(props: { result: CutResult | null; job: JobSettin
           ))}
         </select>
       </div>
-      <div className="hint3d">Drag to orbit · right-drag to pan · scroll to zoom</div>
+      )}
+      <div className={canPlay ? 'hint3d' : 'hint3d low'}>Drag to orbit · right-drag to pan · scroll to zoom</div>
     </div>
   );
 }

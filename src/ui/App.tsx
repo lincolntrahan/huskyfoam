@@ -314,6 +314,7 @@ export function App() {
 
         <div className="workspace">
           <div style={{ position: 'relative', minHeight: 0, display: 'grid' }}>
+            {page !== 'import' && (
             <div className="segmented view-toggle" role="group" aria-label="2D or 3D view">
               <button className={!view3d ? 'active' : ''} aria-pressed={!view3d} onClick={() => setView3d(false)}>
                 2D
@@ -322,9 +323,10 @@ export function App() {
                 3D
               </button>
             </div>
-            {view3d ? (
+            )}
+            {view3d && page !== 'import' ? (
               <Suspense fallback={<div className="canvas-wrap"><div className="empty">Loading 3D view…</div></div>}>
-                <View3D result={result} job={job} machine={machine} />
+                <View3D result={result} job={job} machine={machine} mode={page} />
               </Suspense>
             ) : page === 'import' ? (
               <div className="pickers">
@@ -413,10 +415,10 @@ export function App() {
                   cut
                   <span className="swatch" style={{ background: 'var(--jog)', marginLeft: 8 }} />
                   jog
-                  <span className="swatch" style={{ background: 'var(--left)', marginLeft: 8 }} />
-                  left
-                  <span className="swatch" style={{ background: 'var(--right)', marginLeft: 8 }} />
-                  right carriage
+                  <span className="swatch" style={{ background: 'var(--rootcar)', marginLeft: 8 }} />
+                  root
+                  <span className="swatch" style={{ background: 'var(--tipcar)', marginLeft: 8 }} />
+                  tip carriage
                 </span>
               </div>
             )}

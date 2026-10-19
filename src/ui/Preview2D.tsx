@@ -495,8 +495,8 @@ export function Preview2D(props: Props) {
           {layers.carriages && (
             <>
               <rect x={tx0} y={-ty1} width={tx1 - tx0} height={ty1 - ty0} stroke="var(--muted)" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" strokeWidth={1} />
-              {showLeft && <polyline points={pts(carriage.left)} stroke="var(--left)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
-              {showRight && <polyline points={pts(carriage.right)} stroke="var(--right)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
+              {showLeft && <polyline points={pts(carriage.left)} stroke={props.rootSide === 'left' ? 'var(--rootcar)' : 'var(--tipcar)'} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
+              {showRight && <polyline points={pts(carriage.right)} stroke={props.rootSide === 'left' ? 'var(--tipcar)' : 'var(--rootcar)'} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
             </>
           )}
           {layers.profiles && (
