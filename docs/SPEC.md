@@ -412,6 +412,64 @@ Libraries:
 - Auto pairing: with equal counts of closed (and of open) inner contours, pair by order along the outline's long axis (then across it); otherwise by nearest normalised position.
 - Splits are linked unless `sync.linked[k] === false`; unlinked splits get a dashed ring. Pins are no longer offered (old projects keep theirs and can remove them).
 
+**M2f — Sequencing redesign** (planned)
+
+*Goal*: Sequence Cuts becomes a feature tree you build pair by pair, like a CAD feature tree, instead of one global plan you edit after the fact.
+
+*Starting state*
+- A new job's plan is **empty**. The canvas draws each contour pair in its pair colour (the same colours as on Import), and nothing is cut yet.
+- Sequence Cuts reports *"Nothing sequenced yet"* as an error until every pair is cut, so Preview and Export stay locked until then.
+- **Sequence all** builds the default in one click:
+  - every inner pair first, in order along the chord, each with a vertical plunge;
+  - then the outline as a Loop;
+  - jogs between them, and a final jog home.
+- Older projects (saved with no plan, which meant "the default loop") still open with that loop, so their G-code doesn't change.
+
+*Templates, applied to one pair at a time*
+- Pick a pair by clicking a contour on the canvas or its chip in the panel, then press a template.
+- The template's steps go into a **folder** named for the pair, e.g. "Pair 2 · Loop".
+  - Applying a template again to the same pair replaces its folder in place.
+  - Otherwise the folder is inserted at the rollback bar.
+- **Inner pairs** (holes): *Loop* or *Loop (reverse)*.
+  - Jog over the block to directly above the contour's start split.
+  - Cut vertically down to the start split.
+  - Cut all the way round.
+  - Cut vertically back up the same way to the safe height.
+- **The outline**: *Loop*, *Loop (reverse)* or *LE→TE top & bottom*, entering and leaving the way they do today (straight up from home, across to the start; the reverse on the way out).
+- Open contours keep the in-and-back cut: plunge in to the start, cut to the end and back, then cut out.
+
+*Inner contour start split*
+- With automatic splits, each closed inner contour starts at its **highest point on each face**, so the plunge slot down through the part is as short as possible.
+- The extra splits on the outline next to each hole (used by the old default plan) are only added for old projects that still use the old default.
+
+*Jogs*
+- A new step kind, **jog to a point**. It starts wherever the wire is, so reordering never leaves a gap.
+- Routes:
+  - **Over the block** (the default): straight up to the safe height, across, then down to the target, on both faces at once.
+  - **Straight**: a direct move, for moves clear of the foam.
+- **Safe height** = the top of the block (or of the profiles, when no block is set) plus a jog clearance. The clearance is a job setting, default 0.5 in.
+- Templates add the jog that connects their folder to whatever comes before it (the "auto-connect"). That jog is an ordinary step you can edit or delete.
+
+*Folders*
+- One level only: folders hold steps, never other folders.
+- Stored on the plan as `groups` (id, name, pair, template), with each step carrying its group id. A folder is the run of consecutive steps in its group, so walking, remaps and G-code don't change.
+- Folders can be collapsed, renamed, deleted (with their steps) and dragged. You can also make empty folders of your own.
+
+*Editing the tree*
+- **Drag** a step to reorder it, or drop it on a folder to move it in. **Drag** a folder to move all its steps.
+- **Rollback bar**: a bar in the step list that you drag up.
+  - Steps below it are hidden in 2D, 3D and playback, so the canvas shows the cut "so far".
+  - Export always writes the whole sequence, with a reminder if the bar isn't at the bottom.
+  - The bar isn't saved: it goes back to the bottom when you reopen the project.
+- **Insert at the bar**: *+ Jog to…* (click a split, or Home), *+ Cut line* (click points like a run-out), *+ Segment* (click a segment on the canvas), *+ Folder*. New steps go just above the bar.
+
+*Selection*
+- Selecting a step makes it stand out on the canvas: drawn thick and bright, everything else dimmed. Its row in the list is highlighted and scrolled into view.
+- Clicking a cut on the canvas selects its step, and the step with it.
+
+*Unchanged*
+- Run-out drawing, out-and-back, cut/jog toggles, bridging, the per-segment kerf/speed overrides, and the checks (jog through the foam, cut ending in the foam, segments never cut or cut twice).
+
 **M3 — Visualization & polish**
 - 3D view with playback
 - Open/compare existing `.nc`
