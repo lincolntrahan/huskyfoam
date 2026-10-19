@@ -12,6 +12,10 @@ interface Box {
 
 const pts = (list: Vec2[]) => list.map((p) => `${p.x},${-p.y}`).join(' ');
 
+/** Colours for contour pairs 2, 3, …, the same on both pickers (pair 1, the outline, uses the profile's colour). */
+export const PAIR_COLORS = ['#00e65c', '#ffd400', '#ff3dd5', '#00e5ff', '#ff9100', '#b84dff', '#ffffff'];
+export const pairColor = (pair: number, sideColor: string) => (pair <= 0 ? sideColor : PAIR_COLORS[(pair - 1) % PAIR_COLORS.length]);
+
 function bounds(loaded: LoadedProfile): Box | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const add = (p: Vec2) => {
@@ -37,6 +41,11 @@ export function DxfPicker(props: {
   /** null = automatic pick. */
   selection: number[] | null;
   onChange: (sel: number[] | null) => void;
+  /** Pair each contour is cut in (index into the cut's pairs), or -1 when it isn't paired. */
+  pairOf: number[];
+  /** Current rotation (degrees, CCW) and a way to change it. */
+  rotation: number;
+  onRotate: (deg: number) => void;
 }) {
   const { loaded } = props;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -54,6 +63,10 @@ export function DxfPicker(props: {
 
   const selected = new Set(loaded.selected);
   const used = new Set(loaded.used);
+  /** Contour each entity belongs to. */
+  const contourOf = new Map<number, number>();
+  loaded.contourEdges.forEach((ids, c) => ids.forEach((i) => contourOf.set(i, c)));
+  const colorOf = (c: number) => ((props.pairOf[c] ?? -1) < 0 ? 'var(--muted)' : pairColor(props.pairOf[c], props.color));
   const set = (next: Set<number>) => props.onChange([...next].sort((a, b) => a - b));
 
   const toSvg = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -114,6 +127,13 @@ export function DxfPicker(props: {
           </button>
           <button onClick={() => set(new Set(loaded.edges.map((_, i) => i)))}>Include all</button>
           <button onClick={() => props.onChange([])}>Clear</button>
+          <button onClick={() => props.onRotate(props.rotation + 90)} title="Rotate this profile 90° counter-clockwise (to match the cutter's axes)">
+            ⟲ 90°
+          </button>
+          <button onClick={() => props.onRotate(props.rotation - 90)} title="Rotate this profile 90° clockwise">
+            ⟳ 90°
+          </button>
+          {props.rotation % 360 !== 0 && <span className="hint">rotated {((props.rotation % 360) + 360) % 360}°</span>}
         </span>
       </div>
       <svg
@@ -152,7 +172,8 @@ export function DxfPicker(props: {
           {loaded.edges.map((e, i) => {
             const inSel = selected.has(i);
             const inUse = used.has(i);
-            const stroke = inUse ? props.color : inSel ? 'var(--warn)' : 'var(--muted)';
+            const c = contourOf.get(i);
+            const stroke = inUse && c !== undefined ? colorOf(c) : inSel ? 'var(--warn)' : 'var(--muted)';
             return (
               <g key={i}>
                 <polyline
@@ -180,6 +201,29 @@ export function DxfPicker(props: {
                   <title>{`${e.source} ${i + 1}: ${inUse ? 'in the outline' : inSel ? 'included, but not part of the closed outline' : 'excluded'} (click to toggle)`}</title>
                 </polyline>
               </g>
+            );
+          })}
+          {/* pair numbers: the same number (and colour) marks the contours cut together */}
+          {loaded.contours.map((ct, c) => {
+            // the outline's number goes past its -X end (holes sit under its top edge); the others above them
+            const at = c === 0 ? ct.pts.reduce((a, p) => (p.x < a.x ? p : a), ct.pts[0]) : ct.pts.reduce((a, p) => (p.y > a.y ? p : a), ct.pts[0]);
+            const pair = props.pairOf[c] ?? -1;
+            return (
+              <text
+                key={`c${c}`}
+                x={c === 0 ? at.x - unit * 2.5 : at.x}
+                y={c === 0 ? -at.y + unit : -at.y - unit * 1.2}
+                fontSize={unit * 3}
+                fontWeight={700}
+                textAnchor="middle"
+                fill={colorOf(c)}
+                stroke="var(--canvas)"
+                strokeWidth={unit * 0.6}
+                paintOrder="stroke"
+                pointerEvents="none"
+              >
+                {pair < 0 ? '–' : pair + 1}
+              </text>
             );
           })}
           {loaded.texts.map((t, i) => (

@@ -47,8 +47,9 @@ export function insidePolygon(p: Vec2, poly: Vec2[]): boolean {
 
 /**
  * Pair root contours with tip contours by where they sit relative to each side's outer contour
- * (contour 0), which always pairs with contour 0. Returns, for each root contour, the tip
- * contour it pairs with or -1.
+ * (contour 0), which always pairs with contour 0: in order along the outline when both sides
+ * have the same number of holes (and of open contours), else by nearest position. Returns, for
+ * each root contour, the tip contour it pairs with or -1.
  */
 export function autoPairs(root: Profile[], tip: Profile[]): number[] {
   if (!root.length) return [];
@@ -65,6 +66,29 @@ export function autoPairs(root: Profile[], tip: Profile[]): number[] {
   };
   const R = frame(root);
   const T = frame(tip);
+  // Same number of closed (or open) inner contours on both sides: pair them in order along the
+  // outline's long axis (then across it). That survives sweep, taper and twist, where nearest
+  // position can cross pairs over.
+  const along = (list: Profile[]) => {
+    const b = bbox(list[0].pts);
+    return b.w >= b.h ? (q: { u: number; v: number }) => [q.u, q.v] : (q: { u: number; v: number }) => [q.v, q.u];
+  };
+  const keyR = along(root);
+  const keyT = along(tip);
+  for (const closed of [true, false]) {
+    const rs = R.map((q, i) => ({ q, i })).filter((x) => x.i > 0 && x.q.closed === closed);
+    const ts = T.map((q, i) => ({ q, i })).filter((x) => x.i > 0 && x.q.closed === closed);
+    if (!rs.length || rs.length !== ts.length) continue;
+    const order = (xs: typeof rs, key: typeof keyR) =>
+      xs.slice().sort((a, b) => {
+        const [a0, a1] = key(a.q);
+        const [b0, b1] = key(b.q);
+        return Math.abs(a0 - b0) > 0.02 ? a0 - b0 : a1 - b1;
+      });
+    const ro = order(rs, keyR);
+    const to = order(ts, keyT);
+    ro.forEach((x, j) => (out[x.i] = to[j].i));
+  }
   const cand: { r: number; t: number; cost: number }[] = [];
   for (let r = 1; r < R.length; r++) {
     for (let t = 1; t < T.length; t++) {
@@ -73,7 +97,7 @@ export function autoPairs(root: Profile[], tip: Profile[]): number[] {
     }
   }
   cand.sort((a, b) => a.cost - b.cost);
-  const usedT = new Set<number>();
+  const usedT = new Set<number>(out.filter((t) => t >= 0));
   for (const c of cand) {
     if (out[c.r] >= 0 || usedT.has(c.t)) continue;
     out[c.r] = c.t;

@@ -28,18 +28,19 @@ On **Import Geometry** each file is drawn with all of its entities:
 - **Right-drag** pans, the wheel zooms, and double-click fits.
 - Text (title blocks, *SOLIDWORKS Educational* watermarks) is shown in grey and never cut.
 - *Auto pick* (the default) uses the largest closed outline plus every contour inside it (spar holes, slot lines).
+- **⟲ 90° / ⟳ 90°** turn a profile in 90° steps, when the DXF's axes don't match the cutter's (for example a profile exported standing on its leading edge). Each profile turns on its own.
 - The status line says whether your selection forms a closed outline.
 
 ### Several contours: spar holes and open cuts
 
 A profile can have more than one contour: the closed outer outline plus holes (spar channels) and open lines. Pick them on Import like any other geometry.
 
-- **Pairing**: each root contour is cut with a tip contour. They're paired by where they sit in the outline, and you can change a pairing in the **Contours** table on *Segment Profiles* (or set a contour to *not cut*).
-- **Sync**: every contour has its own splits and pins, edited on the canvas as usual. Split numbers run on from one contour to the next.
+- **Pairing**: each root contour is cut with a tip contour. On Import, contours cut together show the same number and colour on both pickers. Holes are paired in order along the outline when both profiles have the same number of them, otherwise by where they sit. Change a pairing (or set a contour to *not cut*) in the **Contour pairs** table under the pickers.
+- **Sync**: every contour has its own splits, edited on the canvas as usual. Split numbers run on from one contour to the next.
   - A closed contour's first split is its start; click a split and choose *Make contour start* to move it.
   - An open contour has a fixed split at each end.
 - **Default plan**: the outline gets an extra split at the point nearest each other contour. The cut leaves the outline there, goes round the hole (or along the open line and back), and returns to the same split before carrying on round the outline. Edit it on *Sequence Cuts* like any plan.
-- **Kerf side**, per contour, in the Contours table:
+- **Kerf side**, per contour, in the Kerf side table on *Segment Profiles*:
   - Closed contours: outside or inside. *Auto* is outside for the outline and inside for holes.
   - Open contours: left or right of the direction they were drawn in. *Auto* is none, so the wire runs on the line.
   - Turn on the kerf layer to check which side was used.
@@ -56,6 +57,7 @@ You only arrange the profiles relative to each other (on *Arrange Profiles*). Wh
   - along the chord: profiles centred, or against the −X or +X side;
   - vertically: profiles in the middle, on the bottom face, or against the top face.
 - *Fit block to profiles* sizes the block to just hold both profiles.
+- **Shims**: Place in Machine and Export say how far above the floor the block's bottom face has to sit, so you can shim it up (and warn if the settings would put it below the floor).
 
 ### 3D view
 
@@ -70,19 +72,16 @@ The **2D / 3D** switch above the canvas works on every page, and *Preview Cut Pa
 
 Each has a checkbox. **▶** plays the cut at 1–100×, and the slider scrubs. Drag to orbit, right-drag to pan, scroll to zoom.
 
-### Sync points: splits and pins
+### Sync points (splits)
 
 Splits are where root and tip are matched (segment N on the root is cut with segment N on the tip). They start out automatic (entity boundaries + sharp corners) and you can edit them:
 
-- **Click a profile outline** to *add a split* or *add a pin*. The matching one is added on the other profile at the same relative position.
-- **Drag** a split or pin marker to slide it along its own profile.
-- **Click a split** for *Make loop start* or *Remove split* (removes the pair).
-- **Pins** (purple diamonds) line up a root point with a tip point inside a segment (e.g. LE to LE) without creating a new segment.
-- **Link**: click a split or pin and choose *Link* to keep its root and tip ends at the same relative position while you drag either one.
-  - A linked split keeps the same fraction of the stretch between its neighbouring splits.
-  - A linked pin keeps the same fraction of its segment.
-  - Linking snaps the other end to match the one you clicked. Linked splits get a white connector line, and linked pins a solid one.
-- *Reset splits & pins to automatic* undoes all of it.
+- **Click a profile outline** to *add a split*. The matching one is added on the other profile at the same relative position.
+- **Drag** a split marker to slide it. Splits are **linked**: the partner on the other profile moves to the same relative position (the same fraction of the stretch between its neighbouring splits).
+- **Click a split** for *Unlink* (it then moves on its own profile only, and gets a dashed ring), *Link again* (snaps the partner to match), *Make contour start* or *Remove split* (removes the pair).
+- *Reset splits to automatic* undoes all of it.
+
+Older versions also had *pins* (sync pairs inside a segment). Projects that have them still cut the same; their pins can be removed but not added.
 
 When splits change, a custom cut plan is carried over where possible. If it can't be, it resets to Loop and tells you.
 

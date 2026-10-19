@@ -407,6 +407,11 @@ Libraries:
 - Shop machine home is (0, 0). Older projects get a layout that keeps their profile planes and block size.
 - Floor offset defaults to 0.25 in (6 mm). If the lowest carriage position on the kerfed cut would fall below the Y travel minimum, the part is raised to put it exactly there instead, and Place in Machine shows the resulting profile height (PR #12).
 
+**M2e — Import pairing, rotation, linked splits** (PR #13)
+- Import: per-profile rotation in 90° steps (`job.rotation`, applied to the DXF geometry on load, exact). Contours are numbered and coloured by pair on both pickers; the pairing table moves to Import, the kerf-side table stays on Segment.
+- Auto pairing: with equal counts of closed (and of open) inner contours, pair by order along the outline's long axis (then across it); otherwise by nearest normalised position.
+- Splits are linked unless `sync.linked[k] === false`; unlinked splits get a dashed ring. Pins are no longer offered (old projects keep theirs and can remove them).
+
 **M3 — Visualization & polish**
 - 3D view with playback
 - Open/compare existing `.nc`

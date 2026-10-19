@@ -21,9 +21,15 @@ export interface SyncSettings {
   root: number[];
   tip: number[];
   pins: Pin[];
-  /** Per split (same order): dragging one side moves the other to the same relative position. */
+  /**
+   * Per split (same order): dragging one side moves the other to the same relative position.
+   * Splits are linked unless set false here.
+   */
   linked?: boolean[];
 }
+
+/** Split k keeps root and tip at the same relative position (the default). */
+export const isLinked = (sync: SyncSettings, k: number) => sync.linked?.[k] ?? true;
 
 /** Segments between n splits: a closed loop wraps back to the first split, an open contour doesn't. */
 export const segCount = (arc: ArcLoop, n: number) => (arcClosed(arc) ? n : Math.max(0, n - 1));

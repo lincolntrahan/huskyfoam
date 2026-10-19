@@ -2,7 +2,7 @@ import { arcClosed, spanS, withinS, wrapS, type ArcLoop } from '../geom/arc';
 import { asTopology, type CutPlan, type Topology } from '../plan/model';
 import { remapInsert, remapRemove, remapRotate, segmentsAtSplit, type SegmentChange } from '../plan/remap';
 import { loopPlan } from '../plan/templates';
-import { atFraction, locate, type Pin, type SyncSettings } from './sync';
+import { atFraction, isLinked, locate, type Pin, type SyncSettings } from './sync';
 
 export type Side = 'root' | 'tip';
 
@@ -50,7 +50,7 @@ export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, s
   const next = { ...sync, root: sync.root.slice(), tip: sync.tip.slice() };
   next[side].splice(at.k + 1, 0, wrapS(arcs[side], s));
   next[other(side)].splice(at.k + 1, 0, partner);
-  if (sync.linked) next.linked = [...sync.linked.slice(0, at.k + 1), false, ...sync.linked.slice(at.k + 1)];
+  if (sync.linked) next.linked = [...sync.linked.slice(0, at.k + 1), true, ...sync.linked.slice(at.k + 1)];
   const { topo, seg0 } = ctxOf(sync, ctx);
   const g = seg0 + at.k;
   return { sync: next, plan: plan && remapInsert(plan, g, topo), change: { kind: 'insert', k: g } };
@@ -69,7 +69,7 @@ export function moveSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, 
   const next = n > 1 ? list[(i + 1) % n] : list[i];
   if (n > 1 && !withinS(arcs[side], prev, next, s)) return null;
   const out = { ...sync, [side]: list.map((v, j) => (j === i ? wrapS(arcs[side], s) : v)) } as SyncSettings;
-  if (sync.linked?.[i]) {
+  if (isLinked(sync, i)) {
     const o = other(side);
     const ol = sync[o];
     const oPrev = n > 1 ? ol[(i - 1 + n) % n] : ol[i];
@@ -85,7 +85,7 @@ export function moveSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, 
  * stretch (between the neighbouring splits) as the one on `side`.
  */
 export function setSplitLinked(sync: SyncSettings, arcs: Arcs, side: Side, i: number, on: boolean): SyncSettings {
-  const linked = sync.root.map((_, j) => (j === i ? on : (sync.linked?.[j] ?? false)));
+  const linked = sync.root.map((_, j) => (j === i ? on : isLinked(sync, j)));
   const base = { ...sync, linked };
   if (!on) return base;
   return moveSplit(base, null, arcs, side, i, sync[side][i])?.sync ?? base;

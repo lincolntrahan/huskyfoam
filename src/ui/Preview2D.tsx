@@ -7,7 +7,8 @@ import { insertOutAndBack, insertPointOnLine, insertRunOut, removeStep, reverseS
 import type { CutPlan, PlanPoint } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
-import { addPin, addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setPinLinked, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
+import { addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
+import { isLinked } from '../core/sync/sync';
 import type { MachinePreset } from '../core/types';
 import type { StepId } from './steps';
 
@@ -317,12 +318,14 @@ export function Preview2D(props: Props) {
       const at = splitAt(k);
       // each contour's first split is its start
       const first = at?.j === 0;
-      const linked = at?.pr.sync.linked?.[at.j];
+      const linked = at ? isLinked(at.pr.sync, at.j) : true;
       return (
         <g key={`${color}-${k}`} className="clickable" onPointerDown={startSyncDrag('split', side, k)}>
-          <title>{`Split ${k + 1}${linked ? ' (linked)' : ''}: click for options, drag to slide along the profile`}</title>
+          <title>{`Split ${k + 1}${linked ? '' : ' (unlinked: moves on this profile only)'}: click for options, drag to slide along the profile`}</title>
           <circle cx={x} cy={y} r={unit * 0.8} fill="transparent" />
           <circle cx={x} cy={y} r={unit * (first ? 0.27 : 0.17)} fill={first ? color : 'var(--canvas)'} stroke={color} strokeWidth={unit * 0.07} />
+          {/* a dashed ring marks a split that no longer follows its partner */}
+          {!linked && <circle cx={x} cy={y} r={unit * 0.45} fill="none" stroke={color} strokeWidth={unit * 0.06} strokeDasharray={`${unit * 0.15} ${unit * 0.1}`} />}
         </g>
       );
     });
@@ -664,17 +667,8 @@ export function Preview2D(props: Props) {
           showR &&
           showT &&
           result.pinPts.root.map((p, i) => (
-            <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray={pinAt(i)?.pr.sync.pins[pinAt(i)!.j]?.linked ? undefined : '3 3'} vectorEffect="non-scaling-stroke" />
+            <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
           ))}
-        {result &&
-          showR &&
-          showT &&
-          showMarkers &&
-          result.splitPts.root.map((p, k) =>
-            splitAt(k)?.pr.sync.linked?.[splitAt(k)!.j] ? (
-              <line key={`splitlink-${k}`} x1={p.x} y1={-p.y} x2={result.splitPts.tip[k].x} y2={-result.splitPts.tip[k].y} stroke="var(--text)" opacity={0.6} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-            ) : null,
-          )}
         {result?.chord && edit.chord && showR && chordMarks('root', 'var(--root)')}
         {result?.chord && edit.chord && showT && chordMarks('tip', 'var(--tip)')}
         {result && showMarkers && edit.sync && showR && pins('root')}
@@ -710,12 +704,12 @@ export function Preview2D(props: Props) {
                   const at = splitAt(menu.k);
                   if (!at) return null;
                   const { p, j, pr } = at;
-                  const linked = !!pr.sync.linked?.[j];
+                  const linked = isLinked(pr.sync, j);
                   const end = !pr.closed && (j === 0 || j === pr.sync.root.length - 1);
                   return (
                     <>
                       {!end &&
-                        menuItem(linked ? 'Unlink from the other profile' : 'Link to the other profile (keep relative position)', () =>
+                        menuItem(linked ? 'Unlink (move on this profile only)' : 'Link again (snaps the other profile to match)', () =>
                           syncEdit(p, { sync: setSplitLinked(pr.sync, pr.arcs, menu.side, j, !linked), plan }),
                         )}
                       {pr.closed && j !== 0 && menuItem('Make contour start', () => syncEdit(p, setLoopStart(pr.sync, plan, j, ctxFor(p))))}
@@ -737,30 +731,15 @@ export function Preview2D(props: Props) {
                   const pr = pairs[menu.pair];
                   syncEdit(menu.pair, addSplit(pr.sync, plan, pr.arcs, menu.side, menu.s, ctxFor(menu.pair)));
                 })}
-              {edit.sync &&
-                pairs[menu.pair] &&
-                menuItem('Add pin here (+ matching one on the other profile)', () => {
-                  const pr = pairs[menu.pair];
-                  const next = addPin(pr.sync, pr.arcs, menu.side, menu.s);
-                  if (next) syncEdit(menu.pair, { sync: next, plan });
-                })}
             </>
           ) : menu.kind === 'pin' ? (
             <>
-              <div className="popover-title">Pin {menu.i + 1}</div>
+              <div className="popover-title">Pin {menu.i + 1} (from an older project)</div>
               {(() => {
                 const at = pinAt(menu.i);
                 if (!at) return null;
                 const { p, j, pr } = at;
-                const linked = !!pr.sync.pins[j]?.linked;
-                return (
-                  <>
-                    {menuItem(linked ? 'Unlink ends' : 'Link ends (keep relative position)', () =>
-                      syncEdit(p, { sync: setPinLinked(pr.sync, pr.arcs, j, menu.side, !linked), plan }),
-                    )}
-                    {menuItem('Remove pin', () => syncEdit(p, { sync: removePin(pr.sync, j), plan }))}
-                  </>
-                );
+                return menuItem('Remove pin', () => syncEdit(p, { sync: removePin(pr.sync, j), plan }));
               })()}
             </>
           ) : (

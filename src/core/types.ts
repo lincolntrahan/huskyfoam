@@ -91,6 +91,8 @@ export interface SamplingSettings {
 export interface JobSettings {
   /** DXF entities used for each profile (indices into the file); null = automatic pick. */
   selection: { root: number[] | null; tip: number[] | null };
+  /** Each DXF is rotated by this many degrees (0, 90, 180, 270; CCW) on import, to match the cutter's axes. */
+  rotation: { root: number; tip: number };
   /**
    * How the part sits on the machine: profile position along the wire, floor offset, block size
    * and alignment. The fields below it (rootFaceFromLeft, span, profile.inset, offset, block)
