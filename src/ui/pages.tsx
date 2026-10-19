@@ -118,6 +118,10 @@ export function ImportPage(c: PageCtx) {
       <section>
         <h2>Profiles</h2>
         <small className="hint">Load the root and tip outlines as DXF (e.g. exported from SolidWorks). Both need to be closed outlines.</small>
+        <small className="hint">
+          On the right, choose which geometry to cut: click an entity to include or exclude it, drag a box to include everything inside (Shift-drag
+          excludes). Text is shown but never cut. <i>Auto pick</i> uses the largest closed outline.
+        </small>
         <FileRow label="Root" color="var(--root)" file={c.rootFile} loaded={c.root} onLoad={c.loadRoot} />
         <FileRow label="Tip" color="var(--tip)" file={c.tipFile} loaded={c.tip} onLoad={c.loadTip} />
         <div className="row-buttons">
@@ -330,8 +334,8 @@ export function PreviewPage(c: PageCtx) {
     <section>
       <h2>Preview cut path</h2>
       <small className="hint">
-        The 3D machine view with playback is coming in M3. For now the canvas shows the finished path on both faces, the wire lines between them, and both
-        carriage paths (green = left, purple = right) against the machine's travel limits.
+        The 3D view shows the machine, the foam block, both profiles, the surface the wire cuts and both carriage paths. Press ▶ to play the cut (pick a
+        speed on the right); drag the slider to scrub. Use the checkboxes to hide parts, and the 2D / 3D switch to go back to the flat view.
       </small>
       {r && (
         <ul className="summary">

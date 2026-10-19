@@ -87,6 +87,8 @@ export interface SamplingSettings {
 }
 
 export interface JobSettings {
+  /** DXF entities used for each profile (indices into the file); null = automatic pick. */
+  selection: { root: number[] | null; tip: number[] | null };
   /** Distance from the left carriage plane to the root face. */
   rootFaceFromLeft: number;
   /** Block span (root face to tip face). */

@@ -8,8 +8,16 @@ export interface Edge {
   source: string; // entity type, for messages
 }
 
+/** Text in the drawing (title blocks, watermarks): shown on import, never cut. */
+export interface DxfText {
+  at: Vec2;
+  text: string;
+  height: number;
+}
+
 export interface DxfResult {
   edges: Edge[];
+  texts: DxfText[];
   units: Units | null; // null when the file doesn't say
   warnings: string[];
 }
@@ -125,6 +133,7 @@ export function parseDxf(text: string): DxfResult {
   const pairs = readPairs(text);
   const groups = entityGroups(pairs);
   const edges: Edge[] = [];
+  const texts: DxfText[] = [];
   const ignored = new Map<string, number>();
   const warnings: string[] = [];
 
@@ -203,6 +212,19 @@ export function parseDxf(text: string): DxfResult {
         }
         break;
       }
+      case 'TEXT':
+      case 'MTEXT': {
+        // MTEXT formatting codes like P (new paragraph) or {Arial|...;} are stripped for display
+        const raw = g.filter((p) => p.code === 1 || p.code === 3).map((p) => p.value).join('');
+        const text = raw
+          .replace(/\\P/g, ' ')
+          .replace(/\\[A-Za-z][^;]*;/g, '')
+          .replace(/[{}]/g, '')
+          .trim();
+        if (text) texts.push({ at: { x: num(g, 10), y: num(g, 20) }, text, height: num(g, 40, 0.1) });
+        ignored.set(type, (ignored.get(type) ?? 0) + 1);
+        break;
+      }
       default:
         ignored.set(type, (ignored.get(type) ?? 0) + 1);
     }
@@ -212,5 +234,5 @@ export function parseDxf(text: string): DxfResult {
   for (const [type, count] of ignored) {
     if (!ignorable.has(type)) warnings.push(`Ignored ${count} unsupported ${type} entit${count === 1 ? 'y' : 'ies'}.`);
   }
-  return { edges, units: headerUnits(pairs), warnings };
+  return { edges, texts, units: headerUnits(pairs), warnings };
 }

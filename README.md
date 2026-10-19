@@ -16,6 +16,30 @@ Everything runs in the browser, so files never leave your computer. See [docs/SP
 
 Preview controls: scroll to zoom, drag to pan, double-click to re-fit.
 
+### Choosing geometry from a DXF
+
+On **Import Geometry** each file is drawn with all of its entities:
+
+- **Click** an entity to include or exclude it.
+- **Drag a box** to include everything inside it; **Shift-drag** excludes.
+- **Right-drag** pans, the wheel zooms, and double-click fits.
+- Text (title blocks, *SOLIDWORKS Educational* watermarks) is shown in grey and never cut.
+- *Auto pick* (the default) uses the largest closed outline.
+- The status line says whether your selection forms a closed outline.
+
+### 3D view
+
+The **2D / 3D** switch above the canvas works on every page, and *Preview Cut Path* opens in 3D. It shows:
+
+- the machine (both carriage planes and the travel envelope)
+- the foam block
+- both profiles
+- the surface the wire cuts through the block
+- the wire
+- both carriage paths
+
+Each has a checkbox. **▶** plays the cut at 1–100×, and the slider scrubs. Drag to orbit, right-drag to pan, scroll to zoom.
+
 ### Sync points: splits and pins
 
 Splits are where root and tip are matched (segment N on the root is cut with segment N on the tip). They start out automatic (entity boundaries + sharp corners) and you can edit them:
