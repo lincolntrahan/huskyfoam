@@ -1,0 +1,8 @@
+{
+  "id": "default-foam",
+  "name": "Default foam (200 mm/min)",
+  "units": "in",
+  "cutSpeed": 7.874016,
+  "kerfRoot": 0.1,
+  "kerfTip": 0.1116
+}

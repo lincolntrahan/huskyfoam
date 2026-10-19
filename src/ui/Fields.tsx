@@ -1,0 +1,41 @@
+import { useEffect, useState } from 'react';
+
+/** Number input that lets you type freely and only reports valid numbers. */
+export function NumberField(props: { label: string; value: number; onChange: (v: number) => void; step?: number; min?: number; hint?: string }) {
+  const [text, setText] = useState(String(props.value));
+  useEffect(() => {
+    if (parseFloat(text) !== props.value) setText(String(props.value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.value]);
+  return (
+    <label className="field" title={props.hint}>
+      <span>{props.label}</span>
+      <input
+        type="number"
+        step={props.step ?? 'any'}
+        min={props.min}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = parseFloat(e.target.value);
+          if (Number.isFinite(v)) props.onChange(v);
+        }}
+      />
+    </label>
+  );
+}
+
+export function SelectField<T extends string>(props: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  return (
+    <label className="field">
+      <span>{props.label}</span>
+      <select value={props.value} onChange={(e) => props.onChange(e.target.value as T)}>
+        {props.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}

@@ -1,0 +1,15 @@
+{
+  "id": "shop-4axis",
+  "name": "Shop 4-axis (Mach3)",
+  "units": "in",
+  "carriageSpacing": 36,
+  "travel": { "x": [0, 40], "y": [0, 20] },
+  "maxSpeed": 30,
+  "home": { "x": 4.005, "y": 0.164 },
+  "axes": { "leftH": "X", "leftV": "Y", "rightH": "Z", "rightV": "A" },
+  "axisOrder": ["leftH", "leftV", "rightH", "rightV"],
+  "feedMode": "G93",
+  "decimals": 6,
+  "header": "{units}\nG17\nG90\nF{cutSpeed}\nM3",
+  "footer": "M5"
+}

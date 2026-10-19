@@ -1,0 +1,176 @@
+import { transformProfile, type Profile } from '../geom/profile';
+import { dist, lerp, type Vec2 } from '../geom/vec';
+import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
+import { resamplePair } from '../sync/resample';
+import { autoSplits, defaultStart, segmentsFrom } from '../sync/segments';
+import type { JobSettings, MachinePreset } from '../types';
+import { offsetStations, type Station } from './kerf';
+
+export interface CutWarning {
+  message: string;
+  /** Index into `moves` where the problem first appears, when it has a location. */
+  moveIndex?: number;
+}
+
+export interface CutResult {
+  ok: boolean;
+  errors: string[];
+  warnings: CutWarning[];
+  /** Split indices into each profile's dense points, in loop order starting at the loop start. */
+  rootSplits: number[];
+  tipSplits: number[];
+  /** Synced face stations before kerf (closed: last equals first). */
+  stations: Station[];
+  /** Kerf-offset face stations (closed). */
+  kerfStations: Station[];
+  /** Carriage start (home) and every move after it, including lead-in/out. */
+  start: CarriagePos;
+  moves: Move[];
+  gcode: string;
+  stats: { cutMinutes: number; maxCarriageSpeed: number; segments: number; moves: number };
+}
+
+/** Linear map from the two face planes to the two carriage planes. */
+export function projector(job: JobSettings, machine: MachinePreset) {
+  const zr = job.rootSide === 'left' ? job.rootFaceFromLeft : job.rootFaceFromLeft + job.span;
+  const zt = job.rootSide === 'left' ? job.rootFaceFromLeft + job.span : job.rootFaceFromLeft;
+  const a = (0 - zr) / (zt - zr);
+  const b = (machine.carriageSpacing - zr) / (zt - zr);
+  return (r: Vec2, t: Vec2): CarriagePos => ({ left: lerp(r, t, a), right: lerp(r, t, b) });
+}
+
+function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
+  const z = { x: 0, y: 0 };
+  return {
+    ok: false,
+    errors,
+    warnings,
+    rootSplits: [],
+    tipSplits: [],
+    stations: [],
+    kerfStations: [],
+    start: { left: z, right: z },
+    moves: [],
+    gcode: '',
+    stats: { cutMinutes: 0, maxCarriageSpeed: 0, segments: 0, moves: 0 },
+  };
+}
+
+function ordered(splits: number[], start: number): number[] {
+  const k = splits.indexOf(start);
+  return [...splits.slice(k), ...splits.slice(0, k)];
+}
+
+export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, machine: MachinePreset): CutResult {
+  const shift = (p: Vec2) => ({ x: p.x + job.offset.x, y: p.y + job.offset.y });
+  const root = transformProfile(rootIn, shift);
+  const tip = transformProfile(tipIn, shift);
+  const errors: string[] = [];
+  const warnings: CutWarning[] = [];
+
+  if (job.span <= 0) return emptyResult(['Block span must be greater than zero.']);
+  if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.']);
+
+  // 1. Splits and segments
+  const rs = autoSplits(root, job.cornerSplitDeg);
+  const ts = autoSplits(tip, job.cornerSplitDeg);
+  const r0 = defaultStart(root, rs);
+  const t0 = defaultStart(tip, ts);
+  const rootSplits = ordered(rs, r0);
+  const tipSplits = ordered(ts, t0);
+  if (rs.length !== ts.length) {
+    const res = emptyResult([
+      `Root has ${rs.length} segments but tip has ${ts.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities (or adjust the corner threshold).`,
+    ]);
+    res.rootSplits = rootSplits;
+    res.tipSplits = tipSplits;
+    return res;
+  }
+  const rSegs = segmentsFrom(root, rs, r0);
+  const tSegs = segmentsFrom(tip, ts, t0);
+
+  // 2. Resample each matched pair to equal counts
+  const stations: Station[] = [];
+  rSegs.forEach((rseg, k) => {
+    const { a, b } = resamplePair(rseg, tSegs[k], job.sampling);
+    for (let i = 0; i < a.length - 1; i++) stations.push({ r: a[i], t: b[i], seg: k, boundary: i === 0 });
+  });
+
+  // 3. Kerf
+  const kerfFor = (side: 'root' | 'tip') => (seg: number) => job.segmentKerf[seg] ?? job.kerf[side];
+  const kerfStations = offsetStations(stations, kerfFor('root'), kerfFor('tip'));
+  const closeLoop = (s: Station[]) => [...s, { ...s[0], boundary: false }];
+
+  // 4. Full face path: home -> lead-in -> loop -> lead-out -> home
+  const home = machine.home;
+  const straight = (p: Vec2) => ({ r: p, t: p, lead: true });
+  const loop = closeLoop(kerfStations).map((s) => ({ r: s.r, t: s.t, lead: false }));
+  const path = [
+    ...job.leadIn.map(straight),
+    ...loop,
+    ...job.leadIn.slice().reverse().map(straight),
+    straight(home),
+  ];
+
+  // 5. Project and time each move
+  const project = projector(job, machine);
+  const start = project(home, home);
+  const moves: Move[] = [];
+  let prevFace = { r: home, t: home };
+  let prevCar = start;
+  let cutMinutes = 0;
+  let maxCarriageSpeed = 0;
+  let capped = 0;
+  let firstCapped = -1;
+  for (const p of path) {
+    const dFace = Math.max(dist(p.r, prevFace.r), dist(p.t, prevFace.t));
+    const car = project(p.r, p.t);
+    const dCar = Math.max(dist(car.left, prevCar.left), dist(car.right, prevCar.right));
+    if (dFace < 1e-9 && dCar < 1e-9) continue;
+    let minutes = dFace / job.cutSpeed;
+    const speed = minutes > 0 ? dCar / minutes : Infinity;
+    maxCarriageSpeed = Math.max(maxCarriageSpeed, speed);
+    if (speed > machine.maxSpeed) {
+      capped++;
+      if (firstCapped < 0) firstCapped = moves.length;
+      minutes = dCar / machine.maxSpeed;
+    }
+    // A carriage still has to move even if both faces barely do (e.g. long lead-ins).
+    if (minutes <= 0) minutes = dCar / machine.maxSpeed;
+    moves.push({ left: car.left, right: car.right, minutes, lead: p.lead });
+    cutMinutes += minutes;
+    prevFace = p;
+    prevCar = car;
+  }
+  if (capped) {
+    warnings.push({
+      message: `${capped} move${capped === 1 ? '' : 's'} would drive a carriage at up to ${maxCarriageSpeed.toFixed(2)} ${machine.units}/min, over the machine cap of ${machine.maxSpeed}. Those moves are slowed to the cap in the G-code.`,
+      moveIndex: firstCapped,
+    });
+  }
+
+  // 6. Travel limits
+  const [x0, x1] = machine.travel.x;
+  const [y0, y1] = machine.travel.y;
+  const outside = (p: Vec2) => p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1;
+  const firstOut = moves.findIndex((m) => outside(m.left) || outside(m.right));
+  if (firstOut >= 0) {
+    const n = moves.filter((m) => outside(m.left) || outside(m.right)).length;
+    warnings.push({ message: `${n} move${n === 1 ? ' goes' : 's go'} outside the machine travel limits.`, moveIndex: firstOut });
+  }
+
+  const gcode = writeGcode(start, moves, machine, job.cutSpeed);
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    rootSplits,
+    tipSplits,
+    stations: closeLoop(stations),
+    kerfStations: closeLoop(kerfStations),
+    start,
+    moves,
+    gcode,
+    stats: { cutMinutes, maxCarriageSpeed, segments: rSegs.length, moves: moves.length },
+  };
+}
