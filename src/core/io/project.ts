@@ -53,6 +53,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     kerfTable: job.kerfTable ?? d.kerfTable,
     wireWatts: job.wireWatts === undefined ? d.wireWatts : job.wireWatts,
     sync: job.sync ?? null,
+    contours: { ...d.contours, ...(job.contours ?? {}) },
     plan: job.plan ?? null,
   };
   delete (out as unknown as Record<string, unknown>).segmentKerf;

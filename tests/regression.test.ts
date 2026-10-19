@@ -39,7 +39,9 @@ describe('V-tail sanity check vs DevFoam', () => {
       const { res } = vtail(mode);
       expect(res.errors).toEqual([]);
       expect(res.stats.segments).toBe(8);
-      const ours = [res.moves[0], ...res.moves.filter((m) => !m.lead)];
+      // the profile loop: from where the lead in reaches the start split, without the leads
+      const first = res.moves.findIndex((m) => !m.lead);
+      const ours = [res.moves[first - 1], ...res.moves.filter((m) => !m.lead)];
       const diff = comparePaths(ours, reference().slice(1, -1));
       expect(diff.rms).toBeLessThan(0.005);
       expect(diff.p95).toBeLessThan(0.01);

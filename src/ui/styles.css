@@ -229,6 +229,12 @@ button.wide { width: 100%; margin-top: 4px; }
 .hint3d { position: absolute; left: 8px; bottom: 54px; color: var(--muted); font-size: 11px; pointer-events: none; }
 .hint3d.low { bottom: 8px; }
 
+/* contour pairing table on the Segment page */
+table.contours { width: 100%; border-collapse: collapse; margin: 6px 0; }
+table.contours th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 2px 4px; }
+table.contours td { padding: 2px 4px; }
+table.contours select { width: 100%; }
+
 /* two fields side by side (left / right measurements) */
 .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .dual .field { min-width: 0; grid-template-columns: 1fr; gap: 2px; }

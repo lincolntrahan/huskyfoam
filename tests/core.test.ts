@@ -185,13 +185,17 @@ describe('choosing DXF entities', () => {
 
   it('uses only the chosen entities', async () => {
     const { loadDxfProfile } = await import('../src/core/io/loadProfile');
+    // three sides of the square: one open contour
     const open = loadDxfProfile(text, 'in', [0, 1, 2]);
-    expect(open.profile).toBeNull();
-    expect(open.warnings.join(' ')).toMatch(/No closed outline/);
+    expect(open.contours).toHaveLength(1);
+    expect(open.contours[0].closed).toBe(false);
+    expect(open.warnings.join(' ')).toMatch(/no closed outline/);
     const none = loadDxfProfile(text, 'in', []);
     expect(none.warnings).toContain('No entities selected.');
+    // a chosen stray entity becomes its own open contour, after the closed outline
     const withStray = loadDxfProfile(text, 'in', [0, 1, 2, 3, 4]);
-    expect(withStray.used).toEqual([0, 1, 2, 3]);
+    expect(withStray.contours.map((c) => c.closed !== false)).toEqual([true, false]);
+    expect(withStray.used).toEqual([0, 1, 2, 3, 4]);
     expect(withStray.selected).toEqual([0, 1, 2, 3, 4]);
   });
 });

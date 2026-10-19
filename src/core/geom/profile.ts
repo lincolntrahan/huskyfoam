@@ -2,14 +2,19 @@ import type { Edge } from '../io/dxf';
 import { dist, type Vec2 } from './vec';
 
 /**
- * A closed profile as a dense CCW polyline (no repeated end point).
+ * A profile contour as a dense polyline. Closed contours run CCW with no repeated end point;
+ * open ones run from one end to the other (`closed: false`).
  * `breaks` are indices where one source entity ends and the next begins; they are the
  * default split (sync) candidates.
  */
 export interface Profile {
   pts: Vec2[];
   breaks: number[];
+  /** False for an open contour (a line or arc that doesn't close). Absent = closed. */
+  closed?: boolean;
 }
+
+export const isClosed = (p: Profile) => p.closed !== false;
 
 export interface ChainResult {
   profile: Profile | null;
@@ -40,34 +45,79 @@ interface Chain {
 function buildChains(edges: Edge[], tol: number): Chain[] {
   const unused = edges.map((e, id) => ({ pts: e.pts, id })).filter((e) => e.pts.length >= 2);
   const chains: Chain[] = [];
+  /** Take an unused edge that touches p, oriented to start at p. */
+  const take = (p: Vec2): { pts: Vec2[]; id: number } | null => {
+    for (let i = 0; i < unused.length; i++) {
+      const e = unused[i].pts;
+      const next = dist(e[0], p) <= tol ? e : dist(e[e.length - 1], p) <= tol ? e.slice().reverse() : null;
+      if (!next) continue;
+      const id = unused[i].id;
+      unused.splice(i, 1);
+      return { pts: next, id };
+    }
+    return null;
+  };
   while (unused.length) {
     const first = unused.shift()!;
-    const pts = first.pts.slice();
-    const ids = [first.id];
-    const breaks = [0];
-    let extended = true;
-    while (extended) {
-      extended = false;
-      const end = pts[pts.length - 1];
-      for (let i = 0; i < unused.length; i++) {
-        const e = unused[i].pts;
-        let next: Vec2[] | null = null;
-        if (dist(e[0], end) <= tol) next = e;
-        else if (dist(e[e.length - 1], end) <= tol) next = e.slice().reverse();
-        if (!next) continue;
-        breaks.push(pts.length - 1);
-        pts.push(...next.slice(1));
-        ids.push(unused[i].id);
-        unused.splice(i, 1);
-        extended = true;
-        break;
-      }
+    let pts = first.pts.slice();
+    let ids = [first.id];
+    let breaks = [0];
+    for (let e = take(pts[pts.length - 1]); e; e = take(pts[pts.length - 1])) {
+      breaks.push(pts.length - 1);
+      pts.push(...e.pts.slice(1));
+      ids.push(e.id);
     }
-    const closed = pts.length > 2 && dist(pts[0], pts[pts.length - 1]) <= tol;
+    let closed = pts.length > 2 && dist(pts[0], pts[pts.length - 1]) <= tol;
+    // an open chain may also continue backwards from its first point
+    if (!closed) {
+      for (let e = take(pts[0]); e; e = take(pts[0])) {
+        const add = e.pts.slice(1).reverse();
+        breaks = [0, ...breaks.map((b) => b + add.length)];
+        pts = [...add, ...pts];
+        ids = [e.id, ...ids];
+      }
+      closed = pts.length > 2 && dist(pts[0], pts[pts.length - 1]) <= tol;
+    }
     if (closed) pts.pop();
     chains.push({ pts, breaks, closed, ids });
   }
   return chains;
+}
+
+/** Chain as a profile: closed ones CCW, open ones as drawn. */
+function toProfile(c: Chain): Profile {
+  let { pts, breaks } = c;
+  if (!c.closed) {
+    breaks = [...new Set([...breaks, pts.length - 1])].sort((a, b) => a - b);
+    return { pts, breaks, closed: false };
+  }
+  if (signedArea(pts) < 0) {
+    const n = pts.length;
+    pts = pts.slice().reverse();
+    breaks = breaks.map((b) => (n - 1 - b + n) % n);
+  }
+  breaks = [...new Set(breaks)].sort((a, b) => a - b);
+  return { pts, breaks };
+}
+
+export interface ChainSetResult {
+  /** Outer (largest closed) contour first, then the other closed ones by size, then open ones. */
+  contours: Profile[];
+  warnings: string[];
+  /** Input edge indices per contour. */
+  edgeIds: number[][];
+}
+
+/** Turn imported edges into every contour they form, closed or open. */
+export function chainProfiles(edges: Edge[], tol = 1e-3): ChainSetResult {
+  const chains = buildChains(edges, tol).filter((c) => c.pts.length >= 2);
+  const area = (c: Chain) => (c.closed ? Math.abs(signedArea(c.pts)) : -1);
+  chains.sort((a, b) => area(b) - area(a));
+  return {
+    contours: chains.map(toProfile),
+    edgeIds: chains.map((c) => c.ids.slice().sort((a, b) => a - b)),
+    warnings: [],
+  };
 }
 
 /**
@@ -102,5 +152,5 @@ export function chainProfile(edges: Edge[], tol = 1e-3): ChainResult {
 }
 
 export function transformProfile(p: Profile, f: (v: Vec2) => Vec2): Profile {
-  return { pts: p.pts.map(f), breaks: p.breaks.slice() };
+  return { ...p, pts: p.pts.map(f), breaks: p.breaks.slice() };
 }

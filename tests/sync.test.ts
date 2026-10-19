@@ -30,7 +30,8 @@ function vtailJob(): JobSettings {
   return job;
 }
 const run = (patch: Partial<JobSettings>) => generateCut(root, tip, { ...vtailJob(), ...patch }, machine);
-const loopMoves = (res: ReturnType<typeof run>) => [res.moves[0], ...res.moves.filter((m) => !m.lead)];
+// the profile loop: from where the lead in reaches the start split, without the leads
+const loopMoves = (res: ReturnType<typeof run>) => [res.moves[res.moves.findIndex((m) => !m.lead) - 1], ...res.moves.filter((m) => !m.lead)];
 const auto = autoSync(root, tip, 30);
 
 describe('arc positions', () => {
@@ -94,7 +95,7 @@ describe('moving, removing, re-starting', () => {
     const lete = leTePlan({ splits: run({}).splitPts.root, block: { x: 4, y: 0.2, w: 14, h: 1.2 }, clearance: 0.5 });
     expect(remapRemove(lete, 3, 8)).toBeNull(); // TE corner is where the lower run-out starts
     const rem = removeSplit(auto, lete, 3)!;
-    expect(rem.note).toMatch(/reset to Loop/);
+    expect(rem.note).toMatch(/reset to the default/);
     expect(generateCut(root, tip, { ...job, sync: rem.sync, plan: rem.plan }, machine).errors).toEqual([]);
   });
 

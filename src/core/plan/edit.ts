@@ -12,6 +12,7 @@ import {
   type PlanPoint,
   type PlanStep,
   type Speed,
+  type Topo,
 } from './model';
 
 // All edits return a new plan and mark it custom.
@@ -54,7 +55,7 @@ export function addSegment(plan: CutPlan, at: number, seg: number, reversed: boo
 }
 
 /** Close the gap before step `before` with a straight line (before = steps.length closes back to home). */
-export function bridgeGap(plan: CutPlan, before: number, speed: Speed, n: number): CutPlan {
+export function bridgeGap(plan: CutPlan, before: number, speed: Speed, n: Topo): CutPlan {
   const p = clonePlan(plan);
   const from = before > 0 ? stepEndRef(p, p.steps[before - 1], n) : HOME;
   const to = before < p.steps.length ? stepStartRef(p, p.steps[before], n) : HOME;
@@ -82,7 +83,7 @@ export function setPoint(plan: CutPlan, id: string, pt: PlanPoint): CutPlan {
 }
 
 /** Index right after the first step that ends at split k, or -1. */
-export function indexAfterSplit(plan: CutPlan, k: number, n: number): number {
+export function indexAfterSplit(plan: CutPlan, k: number, n: Topo): number {
   const i = plan.steps.findIndex((s) => s.kind === 'segment' && segEndSplit(s, n) === k);
   return i < 0 ? -1 : i + 1;
 }
@@ -93,7 +94,7 @@ export function indexAfterSplit(plan: CutPlan, k: number, n: number): number {
  * (the step list will then show a gap until the plan continues from there).
  * The first and last lines are cut speed (run-out / run-in), the ones between are jogs.
  */
-export function insertRunOut(plan: CutPlan, k: number, through: PlanPoint[], endSplit: number | null, n: number): CutPlan {
+export function insertRunOut(plan: CutPlan, k: number, through: PlanPoint[], endSplit: number | null, n: Topo): CutPlan {
   const p = clonePlan(plan);
   let at = indexAfterSplit(p, k, n);
   if (at < 0) at = p.steps.length;
@@ -118,6 +119,6 @@ export function insertRunOut(plan: CutPlan, k: number, through: PlanPoint[], end
 }
 
 /** Out-and-back at split k: run out to an unlocked point and straight back (both cut). */
-export function insertOutAndBack(plan: CutPlan, k: number, out: { r: Vec2; t: Vec2 }, n: number): CutPlan {
+export function insertOutAndBack(plan: CutPlan, k: number, out: { r: Vec2; t: Vec2 }, n: Topo): CutPlan {
   return insertRunOut(plan, k, [{ kind: 'freePair', r: out.r, t: out.t }], k, n);
 }

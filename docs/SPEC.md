@@ -351,7 +351,7 @@ Libraries:
 **M2a — Cut plan**: ✅ done (PR #1)
 - Plan model + walk (segments fwd/rev, line steps, shared points), replacing M1's waypoint lead-in
 - Foam block rectangle on the job; jog speed on the machine preset
-- Templates: Loop (default, M1-identical), LE→TE top & bottom, Out-and-back at a split
+- Templates: Loop (default; M1-identical until the M2c lead change), LE→TE top & bottom, Out-and-back at a split
 - Canvas editing: split-marker menu, click to place points, drag/Shift-drag, line cut/jog toggle; direction arrows
 - Step list: reorder, reverse, skip, cut/jog, gap rows with bridge fixes
 - Checks: gaps (block export), jog through block, cut ending in foam, uncut/repeated segments
@@ -383,6 +383,23 @@ Libraries:
 - Per-segment kerf/speed overrides, auto-kerf from a speed table, corner dwell.
 - Project save/open (`.hfoam.json`).
 
+**M2c — Shop setup & multiple contours** (PRs #9, #10)
+
+*PR #9 — Shop machine, left/right setup, linked sync*
+- Shop machine: 43.25 in carriage spacing, 29 x 12.5 in travel (from the DevFoam machine settings).
+- Define Setup uses left/right wording: block width plus the gap from each carriage, each derived from the other.
+- Splits and pins can be **linked**: dragging one end keeps the other at the same relative position (a split within the stretch between its neighbours, a pin within its segment).
+
+*PR #10 — Multiple contours*
+- Default lead in / out: jog vertically from home to the start split's height, cut horizontally to it (and the reverse at the end), via a `level` plan point that follows split edits. Profile moves are unchanged; the M1 fixtures were regenerated for the new leads.
+- A profile is a list of contours: the outer outline (largest closed) first, then holes and open chains. Auto pick takes the outline and everything inside it.
+- Open contours: arc positions don't wrap; a split at each end (fixed); n splits make n-1 segments.
+- **Pairing**: root contour i is cut with tip contour `job.contours.pairs[i]` (-1 = not cut). Automatic pairing matches centroids normalised to each side's outline bounding box, closed with closed and open with open.
+- **Sync** per pair: pair 0 in `job.sync`, the others in `job.contours.sync[rootIndex]`, all on the raw contours. Transforms come from the outer contour and apply to every contour.
+- **Numbering**: splits and segments are numbered globally, pair after pair. A `Topology` records each contour's first split and segment and whether it's closed; plan walking, remaps and templates use it.
+- **Default plan**: with automatic sync, the outline gets a split at its closest point to each other contour, and each closed contour starts at its point nearest that split. The Loop template cuts in along a cut line, all the way round (open: to the end and back), and back out to the same outline split before continuing.
+- **Kerf side** per pair: outside / inside (closed), left / right of drawing direction (open), or none. Auto is outside for the outline, inside for holes (contours inside the outline), none for open contours. Offsetting left is offsetting right along the reversed path.
+
 **M3 — Visualization & polish**
 - 3D view with playback
 - Open/compare existing `.nc`
@@ -392,6 +409,6 @@ Libraries:
 ---
 
 ## 10. Open items
-1. **Machine facts**: carriage spacing, travel limits, max speed, **jog speed**, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay). The `shop-4axis` preset is a placeholder until then.
+1. **Machine facts**: carriage spacing (43.25 in) and travel (29 x 12.5 in) are in. Still needed: max speed, **jog speed**, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay).
 2. **What "4inback" means** in the example filename (block offset? lead-in?), and why the DevFoam file runs "a little weird" on the machine. That may point to something our output should do differently.
 3. **Hosting**: resolved. The repo is public and deploys to https://lincolntrahan.github.io/huskyfoam/ on every push to `main`. Moving it to the team org later is still an option.

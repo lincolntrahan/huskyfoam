@@ -29,6 +29,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     block: { x: 0, y: 0, w: 0, h: 0 },
     transforms: defaultTransforms(),
     sync: null,
+    contours: { pairs: null, sync: {}, kerfSide: {} },
     plan: null,
   };
 }

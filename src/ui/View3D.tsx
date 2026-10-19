@@ -176,12 +176,15 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
         </lineSegments>
       )}
 
-      {filters.profiles && result.profilePts.root.length > 1 && (
-        <>
-          <Line points={[...result.profilePts.root, result.profilePts.root[0]].map((p) => v3(p, zr))} color={colors.root} lineWidth={2} />
-          <Line points={[...result.profilePts.tip, result.profilePts.tip[0]].map((p) => v3(p, zt))} color={colors.tip} lineWidth={2} />
-        </>
-      )}
+      {filters.profiles &&
+        result.pairs.map((pr, i) =>
+          pr.pts.root.length > 1 ? (
+            <group key={i}>
+              <Line points={(pr.closed ? [...pr.pts.root, pr.pts.root[0]] : pr.pts.root).map((p) => v3(p, zr))} color={colors.root} lineWidth={2} />
+              <Line points={(pr.closed ? [...pr.pts.tip, pr.pts.tip[0]] : pr.pts.tip).map((p) => v3(p, zt))} color={colors.tip} lineWidth={2} />
+            </group>
+          ) : null,
+        )}
 
       {filters.surface && (
         <mesh geometry={surface.g}>

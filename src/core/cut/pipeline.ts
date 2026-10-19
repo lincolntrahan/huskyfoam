@@ -2,11 +2,15 @@ import { applyAffine } from '../geom/affine';
 import type { Profile } from '../geom/profile';
 import { dist, lerp, type Vec2 } from '../geom/vec';
 import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
-import type { CutPlan } from '../plan/model';
-import { loopPlan, type Rect } from '../plan/templates';
-import { splitOffsetLoop, walkPlan, type Gap, type PathPt } from '../plan/walk';
-import { arcLoop, pointAtS, type ArcLoop } from '../geom/arc';
-import { autoSync, syncStations, type SyncSettings } from '../sync/sync';
+import { contourOfSeg, makeTopology, type CutPlan, type Topology } from '../plan/model';
+import { loopPlan, type ContourEntry, type Rect } from '../plan/templates';
+import { joinOffsetLoops, splitOffsetLoop, walkPlan, type Gap, type OffsetLoop, type PathPt } from '../plan/walk';
+import { arcLoop, nearestS, pointAtS, wrapS, type ArcLoop } from '../geom/arc';
+import { isClosed } from '../geom/profile';
+import { addSplit, setLoopStart } from '../sync/edit';
+import { autoSync, segCount, syncStations, type SyncSettings } from '../sync/sync';
+import { autoKerfSide, autoPairs, closestBetween, nearestSplit, offsetSide, type KerfSide } from './contours';
+import type { OffsetSide } from './kerf';
 import type { JobSettings, MachinePreset } from '../types';
 import { findDwells } from './dwell';
 import { offsetStations, type Station } from './kerf';
@@ -23,6 +27,32 @@ export interface CutWarning {
   moveIndex?: number;
   /** Plan step the problem belongs to, when it has one. */
   step?: number;
+}
+
+/** One contour pair as cut (transformed + positioned). */
+export interface PairResult {
+  /** Root and tip contour indices (into the loaded contour lists). */
+  root: number;
+  tip: number;
+  closed: boolean;
+  /** Splits are automatic (nothing stored for this pair). */
+  auto: boolean;
+  /** Sync as cut: positions on `arcs`. Edit it, then store it with `syncToJob`. */
+  sync: SyncSettings;
+  arcs: { root: ArcLoop; tip: ArcLoop };
+  syncToJob: (s: SyncSettings) => SyncSettings;
+  /** Contour outlines as cut (before kerf). */
+  pts: { root: Vec2[]; tip: Vec2[] };
+  /** Kerf side as set (maybe 'auto'), what 'auto' means here, and the offset direction used. */
+  kerfSide: KerfSide;
+  autoKerfSide: KerfSide;
+  offset: OffsetSide;
+  /** Stations before / after kerf, global segment numbers (closed contours repeat the first at the end). */
+  stations: Station[];
+  kerfStations: Station[];
+  /** First global split and segment number of this pair. */
+  split0: number;
+  seg0: number;
 }
 
 export interface CutResult {
@@ -44,8 +74,16 @@ export interface CutResult {
   rawS: ((side: 'root' | 'tip', s: number) => number) | null;
   /** Positioned split points, in loop order (index = split number - 1). */
   splitPts: { root: Vec2[]; tip: Vec2[] };
-  /** Positioned pin points. */
+  /** Positioned pin points, all pairs in order. */
   pinPts: { root: Vec2[]; tip: Vec2[] };
+  /** Pair each pin belongs to. */
+  pinPair: number[];
+  /** Every contour pair being cut; pair 0 is the outer one (the fields above). */
+  pairs: PairResult[];
+  /** How splits and segments are numbered across the pairs. */
+  topology: Topology | null;
+  /** Where the default plan enters each other contour. */
+  entries: ContourEntry[];
   /** Transformed + positioned outlines, as cut (before kerf). */
   profilePts: { root: Vec2[]; tip: Vec2[] };
   /** LE, TE and twist pivot of each profile, in machine face coordinates. */
@@ -106,6 +144,10 @@ function emptyResult(errors: string[], stage: Stage, warnings: CutWarning[] = []
     rawS: null,
     splitPts: { root: [], tip: [] },
     pinPts: { root: [], tip: [] },
+    pinPair: [],
+    pairs: [],
+    topology: null,
+    entries: [],
     profilePts: { root: [], tip: [] },
     chord: null,
     stations: [],
@@ -119,6 +161,8 @@ function emptyResult(errors: string[], stage: Stage, warnings: CutWarning[] = []
     stats: { cutMinutes: 0, maxCarriageSpeed: 0, segments: 0, moves: 0, dwells: 0 },
   };
 }
+
+const closeLoop = (s: Station[]) => (s.length ? [...s, { ...s[0], boundary: false }] : s);
 
 const hasBlock = (b: Rect) => b.w > 0 && b.h > 0;
 
@@ -146,14 +190,17 @@ export function crossesRect(a: Vec2, b: Vec2, r: Rect): boolean {
 
 const inside = (p: Vec2, r: Rect) => p.x > r.x + 1e-6 && p.x < r.x + r.w - 1e-6 && p.y > r.y + 1e-6 && p.y < r.y + r.h - 1e-6;
 
-export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, machine: MachinePreset): CutResult {
+export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profile[], job: JobSettings, machine: MachinePreset): CutResult {
   const errors: string[] = [];
   const warnings: CutWarning[] = [];
+  const rootList = Array.isArray(rootIn) ? rootIn : [rootIn];
+  const tipList = Array.isArray(tipIn) ? tipIn : [tipIn];
 
   if (job.span <= 0) return emptyResult(['Block span must be greater than zero.'], 'setup');
   const planes = profilePlanes(job);
   if (!(planes.distance > 0)) return emptyResult(['Profile distance must be greater than zero.'], 'transform');
   if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.'], 'setup');
+  if (!rootList.length || !tipList.length) return emptyResult(['Both profiles need at least one contour.'], 'import');
 
   if (planes.inset < -1e-9 || planes.inset + planes.distance > job.span + 1e-9) {
     warnings.push({ stage: 'transform', message: 'The profiles sit outside the foam block along the wire (check profile distance and inset against the block span).' });
@@ -161,14 +208,17 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   const T = job.transforms ?? defaultTransforms();
   if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.'], 'transform');
 
-  // 1. Transform each profile (twist / scale / flip / move about its pivot, then the part offset)
-  const raw = { root: arcLoop(rootIn), tip: arcLoop(tipIn) };
+  // 1. Transform each profile (twist / scale / flip / move about its pivot, then the part offset).
+  //    The outer contour (0) sets the chord and pivot; every contour of that side moves with it.
+  const rootIn0 = rootList[0];
+  const tipIn0 = tipList[0];
+  const raw = { root: arcLoop(rootIn0), tip: arcLoop(tipIn0) };
   const st = {
-    root: sideTransform(rootIn, raw.root, T.root, T.flipH, T.flipV, job.offset),
-    tip: sideTransform(tipIn, raw.tip, T.tip, T.flipH, T.flipV, job.offset),
+    root: sideTransform(rootIn0, raw.root, T.root, T.flipH, T.flipV, job.offset),
+    tip: sideTransform(tipIn0, raw.tip, T.tip, T.flipH, T.flipV, job.offset),
   };
-  const root = applyToProfile(rootIn, st.root);
-  const tip = applyToProfile(tipIn, st.tip);
+  const root = applyToProfile(rootIn0, st.root);
+  const tip = applyToProfile(tipIn0, st.tip);
   const profilePts = { root: root.pts, tip: tip.pts };
   const chordOf = (k: 'root' | 'tip') => {
     const c = st[k].chord;
@@ -176,75 +226,180 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   };
   const chord = { root: chordOf('root'), tip: chordOf('tip') };
 
-  // 2. Splits (sync points). job.sync is stored on the raw outlines; auto sync is found on the cut shape.
-  const rootArc = arcLoop(root);
-  const tipArc = arcLoop(tip);
-  const syncT = job.sync ? syncToTransformed(job.sync, st, raw) : autoSync(root, tip, job.cornerSplitDeg);
-  const syncToJob = (x: SyncSettings) => syncToRaw(x, st, raw);
+  // 2. Pair the contours: the outer ones always, the rest by position (or as the user paired them).
+  const C = job.contours ?? { pairs: null, sync: {}, kerfSide: {} };
+  const want = C.pairs && C.pairs.length === rootList.length ? C.pairs : autoPairs(rootList, tipList);
+  const used = new Set<number>([0]);
+  const pairList: { r: number; t: number }[] = [{ r: 0, t: 0 }];
+  for (let r = 1; r < rootList.length; r++) {
+    const t = want[r];
+    if (t == null || t < 1 || t >= tipList.length || used.has(t)) {
+      warnings.push({ stage: 'segment', message: `Root contour ${r + 1} has no tip contour to pair with, so it is not cut.` });
+      continue;
+    }
+    used.add(t);
+    pairList.push({ r, t });
+  }
+  for (let t = 1; t < tipList.length; t++) {
+    if (!used.has(t)) warnings.push({ stage: 'segment', message: `Tip contour ${t + 1} has no root contour to pair with, so it is not cut.` });
+  }
+
+  // 3. Splits (sync points) per pair. Stored syncs are on the raw contours; auto sync is found on the cut shape.
   const rawS = (side: 'root' | 'tip', x: number) => {
     const one = syncToRaw({ root: [x], tip: [x], pins: [] }, st, raw);
     return one[side][0];
   };
-  const splitPts = { root: syncT.root.map((s) => pointAtS(rootArc, s)), tip: syncT.tip.map((s) => pointAtS(tipArc, s)) };
-  const pinPts = { root: syncT.pins.map((p) => pointAtS(rootArc, p.root)), tip: syncT.pins.map((p) => pointAtS(tipArc, p.tip)) };
-  const extra = { sync: syncT, arcs: { root: rootArc, tip: tipArc }, syncToJob, rawS, splitPts, pinPts, profilePts, chord };
-  if (syncT.root.length !== syncT.tip.length) {
-    return Object.assign(
-      emptyResult([
-        `Root has ${syncT.root.length} segments but tip has ${syncT.tip.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
-      ], 'segment'),
-      extra,
-    );
+  const pairs: PairResult[] = pairList.map(({ r, t }, p) => {
+    const rawA = p === 0 ? raw : { root: arcLoop(rootList[r]), tip: arcLoop(tipList[t]) };
+    const cut = p === 0 ? { root, tip } : { root: applyToProfile(rootList[r], st.root), tip: applyToProfile(tipList[t], st.tip) };
+    const arcs = { root: arcLoop(cut.root), tip: arcLoop(cut.tip) };
+    const stored = p === 0 ? job.sync : C.sync[r];
+    const sync = stored ? syncToTransformed(stored, st, rawA) : autoSync(cut.root, cut.tip, job.cornerSplitDeg);
+    const closed = isClosed(cut.root);
+    const chosen = C.kerfSide[r] ?? 'auto';
+    const autoSide = autoKerfSide(cut.root, root, p === 0);
+    return {
+      root: r,
+      tip: t,
+      closed,
+      auto: !stored,
+      sync,
+      arcs,
+      syncToJob: (x: SyncSettings) => syncToRaw(x, st, rawA),
+      pts: { root: cut.root.pts, tip: cut.tip.pts },
+      kerfSide: chosen,
+      autoKerfSide: autoSide,
+      offset: offsetSide(chosen, cut.root, root, p === 0),
+      stations: [],
+      kerfStations: [],
+      split0: 0,
+      seg0: 0,
+    };
+  });
+  for (const pr of pairs.slice(1)) {
+    if (pr.closed !== isClosed(tipList[pr.tip])) {
+      const res = emptyResult([`Root contour ${pr.root + 1} and tip contour ${pr.tip + 1} can't be cut together: one is closed and the other is open. Pair them differently.`], 'segment', warnings);
+      return Object.assign(res, { pairs, profilePts, chord, rawS });
+    }
   }
-  const n = syncT.root.length;
 
-  // 3. Resample each matched pair (and pin spans) to equal counts
-  const synced = syncStations(rootArc, tipArc, syncT, job.sampling);
-  const stations: Station[] = synced.stations;
-  warnings.push(...synced.warnings.map((message) => ({ message, stage: 'segment' as const })));
+  // Default entries: leave the outer contour where it comes closest to each other contour.
+  const outer = pairs[0];
+  for (const pr of pairs.slice(1)) {
+    const near = closestBetween(outer.arcs.root, pr.arcs.root);
+    if (outer.auto) {
+      const ed = addSplit(outer.sync, null, outer.arcs, 'root', near.sa);
+      if (ed) outer.sync = ed.sync;
+    }
+    if (pr.auto && pr.closed) {
+      // start the contour at the point nearest the outer contour
+      const sIn = nearestS(pr.arcs.root, pointAtS(outer.arcs.root, near.sa)).s;
+      let k = pr.sync.root.findIndex((x) => Math.abs(x - sIn) < 1e-6);
+      if (k < 0) {
+        const ed = addSplit(pr.sync, null, pr.arcs, 'root', sIn);
+        if (ed) {
+          pr.sync = ed.sync;
+          k = pr.sync.root.findIndex((x) => Math.abs(x - wrapS(pr.arcs.root, sIn)) < 1e-9);
+        }
+      }
+      if (k > 0) pr.sync = setLoopStart(pr.sync, null, k).sync;
+    }
+  }
+  const syncT = outer.sync;
+  const syncToJob = outer.syncToJob;
+  const rootArc = outer.arcs.root;
+  const tipArc = outer.arcs.tip;
 
-  // 4. Kerf, on the full closed loop. Segment overrides win; otherwise fixed per face, or from
-  //    the material's kerf table at the speed each face actually moves at that point.
+  const splitPts = {
+    root: pairs.flatMap((pr) => pr.sync.root.map((s) => pointAtS(pr.arcs.root, s))),
+    tip: pairs.flatMap((pr) => pr.sync.tip.map((s) => pointAtS(pr.arcs.tip, s))),
+  };
+  const pinPts = {
+    root: pairs.flatMap((pr) => pr.sync.pins.map((x) => pointAtS(pr.arcs.root, x.root))),
+    tip: pairs.flatMap((pr) => pr.sync.pins.map((x) => pointAtS(pr.arcs.tip, x.tip))),
+  };
+  const pinPair = pairs.flatMap((pr, p) => pr.sync.pins.map(() => p));
+  const extra = { sync: syncT, arcs: { root: rootArc, tip: tipArc }, syncToJob, rawS, splitPts, pinPts, pinPair, profilePts, chord, pairs };
+  for (const [p, pr] of pairs.entries()) {
+    if (pr.sync.root.length !== pr.sync.tip.length) {
+      const what = pairs.length > 1 ? `Contour pair ${p + 1}: root` : 'Root';
+      return Object.assign(
+        emptyResult([
+          `${what} has ${segCount(pr.arcs.root, pr.sync.root.length)} segments but tip has ${segCount(pr.arcs.tip, pr.sync.tip.length)}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
+        ], 'segment', warnings),
+        extra,
+      );
+    }
+    if (!pr.closed && pr.sync.root.length < 2) {
+      return Object.assign(emptyResult([`Contour pair ${p + 1} is open but has fewer than 2 splits.`], 'segment', warnings), extra);
+    }
+  }
+  const topology = makeTopology(pairs.map((pr) => ({ closed: pr.closed, splits: pr.sync.root.length })));
+  pairs.forEach((pr, p) => {
+    pr.split0 = topology.contours[p].split0;
+    pr.seg0 = topology.contours[p].seg0;
+  });
+  const n = topology.segs;
+  // where the default plan enters each other contour: the outer split nearest its first split
+  const outerSplits = splitPts.root.slice(0, outer.sync.root.length);
+  const entries: ContourEntry[] = pairs.slice(1).map((pr, i) => ({ outer: nearestSplit(outerSplits, splitPts.root[pr.split0]), contour: i + 1 }));
+
+  // 4. Resample each matched pair (and pin spans) to equal counts, then kerf. Segment overrides
+  //    win; otherwise fixed per face, or from the material's kerf table at the speed each face
+  //    actually moves at that point.
   const over = job.segmentOverrides ?? {};
   const segSpeed = (seg: number) => over[seg]?.speed ?? job.cutSpeed;
-  let kerfFor = (side: 'root' | 'tip') => (_i: number, seg: number) => over[seg]?.kerf ?? job.kerf[side];
-  if (job.kerf.mode === 'auto') {
-    if (!job.kerfTable?.length) {
-      warnings.push({ stage: 'setup', message: 'Auto kerf needs a kerf table in the material (use the kerf test). Using the fixed root/tip kerf instead.' });
-    } else {
-      let clamped = 0;
+  const auto = job.kerf.mode === 'auto';
+  if (auto && !job.kerfTable?.length) {
+    warnings.push({ stage: 'setup', message: 'Auto kerf needs a kerf table in the material (use the kerf test). Using the fixed root/tip kerf instead.' });
+  }
+  let clamped = 0;
+  const loops: OffsetLoop[] = pairs.map((pr) => {
+    const synced = syncStations(pr.arcs.root, pr.arcs.tip, pr.sync, job.sampling);
+    warnings.push(...synced.warnings.map((message) => ({ message: pairs.length > 1 ? `Contour pair ${pairs.indexOf(pr) + 1}: ${message}` : message, stage: 'segment' as const })));
+    const local: Station[] = synced.stations;
+    const segs = topology.contours[pairs.indexOf(pr)].segs;
+    // global segment of a local one (an open contour's end station belongs to its last segment)
+    const gSeg = (seg: number) => pr.seg0 + Math.min(seg, Math.max(segs - 1, 0));
+    let kerfFor = (side: 'root' | 'tip') => (_i: number, seg: number) => over[gSeg(seg)]?.kerf ?? job.kerf[side];
+    if (auto && job.kerfTable?.length) {
       const faceKerf = (side: 'root' | 'tip') =>
-        stations.map((st, i) => {
-          const next = stations[(i + 1) % stations.length];
-          const dr = dist(st.r, next.r);
-          const dt = dist(st.t, next.t);
+        local.map((s, i) => {
+          const next = local[(i + 1) % local.length];
+          const dr = dist(s.r, next.r);
+          const dt = dist(s.t, next.t);
           const m = Math.max(dr, dt);
           // the faster face moves at the segment's cut speed; the other in proportion
-          const v = m > 0 ? (segSpeed(st.seg) * (side === 'root' ? dr : dt)) / m : segSpeed(st.seg);
+          const v = m > 0 ? (segSpeed(gSeg(s.seg)) * (side === 'root' ? dr : dt)) / m : segSpeed(gSeg(s.seg));
           const k = kerfAt(job.kerfTable, v);
           if (k.clamped) clamped++;
           return k.kerf;
         });
       const table = { root: faceKerf('root'), tip: faceKerf('tip') };
-      kerfFor = (side) => (i, seg) => over[seg]?.kerf ?? table[side][i];
-      if (clamped) {
-        warnings.push({ stage: 'setup', message: `${clamped} point${clamped === 1 ? ' moves' : 's move'} faster or slower than the kerf table covers; the nearest table kerf was used.` });
-      }
+      kerfFor = (side) => (i, seg) => over[gSeg(seg)]?.kerf ?? table[side][i];
     }
+    const kerfLocal = offsetStations(local, kerfFor('root'), kerfFor('tip'), { open: !pr.closed, side: pr.offset });
+    const globalSeg = (s: Station): Station => ({ ...s, seg: gSeg(s.seg) });
+    pr.stations = pr.closed ? closeLoop(local).map(globalSeg) : local.map(globalSeg);
+    pr.kerfStations = pr.closed ? closeLoop(kerfLocal).map(globalSeg) : kerfLocal.map(globalSeg);
+    return splitOffsetLoop(kerfLocal, pr.sync.root.length, segs);
+  });
+  if (clamped) {
+    warnings.push({ stage: 'setup', message: `${clamped} point${clamped === 1 ? ' moves' : 's move'} faster or slower than the kerf table covers; the nearest table kerf was used.` });
   }
-  const kerfStations = offsetStations(stations, kerfFor('root'), kerfFor('tip'));
-  const closeLoop = (s: Station[]) => [...s, { ...s[0], boundary: false }];
+  const stations = outer.stations;
+  const kerfStations = outer.kerfStations;
 
   // 5. Walk the cut plan
-  const plan = job.plan ?? loopPlan(n);
+  const plan = job.plan ?? loopPlan(topology, false, entries);
   const home = machine.home;
+  const pathExtra = { ...extra, topology, entries, stations, kerfStations, plan };
   let walk;
   try {
-    walk = walkPlan(plan, splitOffsetLoop(kerfStations, n), home);
+    walk = walkPlan(plan, joinOffsetLoops(loops), home, topology);
   } catch (e) {
-    const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`], 'sequence');
-    Object.assign(res, { ...extra, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
-    return res;
+    const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`], 'sequence', warnings);
+    return Object.assign(res, pathExtra);
   }
   for (const g of walk.gaps) {
     errors.push(
@@ -254,8 +409,10 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     );
   }
   walk.segUse.forEach((count, k) => {
+    // an open contour is normally cut there and back
+    const open = !topology.contours[contourOfSeg(topology, k)]?.closed;
     if (count === 0) warnings.push({ stage: 'sequence', message: `Segment ${k + 1} is never cut.` });
-    if (count > 1) warnings.push({ stage: 'sequence', message: `Segment ${k + 1} is cut ${count} times.` });
+    if (count > (open ? 2 : 1)) warnings.push({ stage: 'sequence', message: `Segment ${k + 1} is cut ${count} times.` });
   });
 
   // 6. Project and time each move
@@ -357,10 +514,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     errors,
     errorStages: errors.map(() => 'sequence' as const),
     warnings,
-    ...extra,
-    stations: closeLoop(stations),
-    kerfStations: closeLoop(kerfStations),
-    plan,
+    ...pathExtra,
     path: walk.path,
     gaps: walk.gaps,
     start,

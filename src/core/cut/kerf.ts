@@ -23,19 +23,27 @@ interface SideCorner {
   arcCount: number;
 }
 
-function neighbor(pts: Vec2[], i: number, dir: 1 | -1): Vec2 {
+/** The next distinct point in direction dir; null past the end of an open contour. */
+function neighbor(pts: Vec2[], i: number, dir: 1 | -1, closed: boolean): Vec2 | null {
   const n = pts.length;
   for (let k = 1; k < n; k++) {
-    const q = pts[(((i + dir * k) % n) + n) % n];
+    const j = i + dir * k;
+    if (!closed && (j < 0 || j >= n)) return null;
+    const q = pts[((j % n) + n) % n];
     if (dist(q, pts[i]) > EPS) return q;
   }
-  return pts[i];
+  return null;
 }
 
-function sideCorner(pts: Vec2[], i: number, h: number, isBoundary: boolean): SideCorner {
+function sideCorner(pts: Vec2[], i: number, h: number, isBoundary: boolean, closed: boolean): SideCorner {
   const p = pts[i];
-  const dIn = normalize(sub(p, neighbor(pts, i, -1)));
-  const dOut = normalize(sub(neighbor(pts, i, 1), p));
+  const before = neighbor(pts, i, -1, closed);
+  const after = neighbor(pts, i, 1, closed);
+  // the ends of an open contour carry straight on
+  let dIn = before ? normalize(sub(p, before)) : null;
+  let dOut = after ? normalize(sub(after, p)) : null;
+  dIn ??= dOut ?? { x: 1, y: 0 };
+  dOut ??= dIn;
   const nIn = perpR(dIn);
   const nOut = perpR(dOut);
   const theta = Math.atan2(cross(dIn, dOut), dot(dIn, dOut));
@@ -61,22 +69,40 @@ function sideCorner(pts: Vec2[], i: number, h: number, isBoundary: boolean): Sid
 }
 
 /**
- * Offset every station outward by half the kerf on each face, keeping root and tip in sync.
+ * Which way the wire offsets from the drawn path: to the right of the direction of travel
+ * (outward on a CCW loop), to the left (into a CCW hole), or not at all.
+ */
+export type OffsetSide = 'right' | 'left' | 'none';
+
+/**
+ * Offset every station by half the kerf on each face, keeping root and tip in sync.
  * Convex corners get an arc with the same number of points on both faces; a face that does
  * not need an arc at that station just holds its point.
- * `stations` is a closed loop without the repeated closing station.
+ * `stations` is a closed loop without the repeated closing station, or with `open` an open
+ * contour from end to end. By default the offset goes right of travel (outward on CCW).
  */
 export function offsetStations(
   stations: Station[],
   kerfRoot: (i: number, seg: number) => number,
   kerfTip: (i: number, seg: number) => number,
+  opts: { open?: boolean; side?: OffsetSide } = {},
 ): Station[] {
+  const side = opts.side ?? 'right';
+  if (side === 'left') {
+    // offsetting left = offsetting right while travelling the other way
+    const n = stations.length;
+    const rev = offsetStations(stations.slice().reverse(), (i, seg) => kerfRoot(n - 1 - i, seg), (i, seg) => kerfTip(n - 1 - i, seg), { ...opts, side: 'right' });
+    return rev.reverse();
+  }
+  const closed = !opts.open;
   const R = stations.map((s) => s.r);
   const T = stations.map((s) => s.t);
   const out: Station[] = [];
   stations.forEach((s, i) => {
-    const cr = sideCorner(R, i, kerfRoot(i, s.seg) / 2, s.boundary);
-    const ct = sideCorner(T, i, kerfTip(i, s.seg) / 2, s.boundary);
+    const kr = side === 'none' ? 0 : kerfRoot(i, s.seg);
+    const kt = side === 'none' ? 0 : kerfTip(i, s.seg);
+    const cr = sideCorner(R, i, kr / 2, s.boundary, closed);
+    const ct = sideCorner(T, i, kt / 2, s.boundary, closed);
     const m = Math.max(cr.arcCount, ct.arcCount);
     for (let j = 0; j <= m; j++) {
       out.push({ r: cr.at(j, m), t: ct.at(j, m), seg: s.seg, boundary: s.boundary && j === 0, corner: s.boundary });

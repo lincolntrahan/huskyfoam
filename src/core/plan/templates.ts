@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geom/vec';
-import { HOME, splitId, type CutPlan, type PlanStep } from './model';
+import { asTopology, HOME, splitId, type CutPlan, type PlanStep, type Topo } from './model';
 
 export interface Rect {
   x: number;
@@ -8,18 +8,82 @@ export interface Rect {
   h: number;
 }
 
+/** Where the default plan leaves the outer contour to cut another one: both are global split numbers. */
+export interface ContourEntry {
+  /** Split on the outer contour (contour 0) the cut leaves from and comes back to. */
+  outer: number;
+  /** Contour cut there. */
+  contour: number;
+}
+
 /**
- * Home -> loop start -> every segment -> back to the start -> home. Forward is the same as M1;
- * reversed runs the loop the other way (all segments reversed, last first).
+ * Home -> loop start -> every segment -> back to the start -> home. The lead in jogs straight up
+ * from home to the start's height and cuts across to it; the lead out mirrors it. Reversed runs
+ * the loop the other way (all segments reversed, last first).
+ * With more contours, each `entries` contour is cut when the outer loop reaches its entry
+ * split: a cut line in to its first split, all the way round it (an open contour: to its end
+ * and back), and a cut line back out to the outer contour.
  */
-export function loopPlan(n: number, reversed = false): CutPlan {
-  const segs = Array.from({ length: n }, (_, k): PlanStep => ({ id: `g${k + 1}`, kind: 'segment', seg: k, reversed }));
-  const steps: PlanStep[] = [
-    { id: 'l1', kind: 'line', from: HOME, to: splitId(0), speed: 'cut' },
-    ...(reversed ? segs.reverse() : segs),
-    { id: 'l2', kind: 'line', from: splitId(0), to: HOME, speed: 'cut' },
-  ];
-  return { points: { [HOME]: { kind: 'home' }, [splitId(0)]: { kind: 'split', split: 0 } }, steps, template: reversed ? 'loop-reverse' : 'loop' };
+export function loopPlan(t: Topo, reversed = false, entries: ContourEntry[] = []): CutPlan {
+  const topo = asTopology(t);
+  const outer = topo.contours[0] ?? { closed: true, split0: 0, splits: 0, seg0: 0, segs: 0 };
+  const points: CutPlan['points'] = { [HOME]: { kind: 'home' }, [splitId(0)]: { kind: 'split', split: 0 } };
+  const steps: PlanStep[] = [];
+  let g = 0;
+  let l = 0;
+  const seg = (k: number, rev: boolean) => steps.push({ id: `g${++g}`, kind: 'segment', seg: k, reversed: rev });
+  const line = (from: number | 'home', to: number | 'home') => {
+    const id = (k: number | 'home') => {
+      if (k === 'home') return HOME;
+      points[splitId(k)] = { kind: 'split', split: k };
+      return splitId(k);
+    };
+    steps.push({ id: `l${++l}`, kind: 'line', from: id(from), to: id(to), speed: 'cut' });
+  };
+  /** Cut every contour entered at outer split k, then return to k. */
+  const visit = (k: number) => {
+    for (const e of entries.filter((x) => x.outer === k)) {
+      const c = topo.contours[e.contour];
+      if (!c || !c.segs) continue;
+      line(k, c.split0);
+      const ks = Array.from({ length: c.segs }, (_, j) => c.seg0 + j);
+      if (c.closed) for (const j of reversed ? ks.reverse() : ks) seg(j, reversed);
+      else {
+        for (const j of ks) seg(j, false);
+        for (const j of ks.reverse()) seg(j, true);
+      }
+      line(c.split0, k);
+    }
+  };
+
+  // an open outer contour runs end to end: reversed, it starts at its last split
+  const first = !outer.closed && reversed ? outer.split0 + outer.splits - 1 : outer.split0;
+  const last = outer.closed ? outer.split0 : reversed ? outer.split0 : outer.split0 + outer.splits - 1;
+  // lead in: jog straight up from home to the start split's height, then cut across to it
+  points.lin = { kind: 'level', split: first, ...(reversed ? { corner: 'last' as const } : {}) };
+  steps.push({ id: `l${++l}`, kind: 'line', from: HOME, to: 'lin', speed: 'jog' });
+  steps.push({ id: `l${++l}`, kind: 'line', from: 'lin', to: (points[splitId(first)] = { kind: 'split', split: first }, splitId(first)), speed: 'cut' });
+  const outerSegs = Array.from({ length: outer.segs }, (_, j) => outer.seg0 + j);
+  // contours are visited from the outer split the wire is at (each split once)
+  visit(first);
+  if (!reversed) {
+    for (const j of outerSegs) {
+      if (j > 0) visit(j);
+      seg(j, false);
+    }
+    if (last !== first) visit(last);
+  } else {
+    for (const j of outerSegs.reverse()) {
+      seg(j, true);
+      if (j !== first) visit(j);
+    }
+  }
+  // lead out: cut straight across to home's X, then jog down to home
+  points.lout = { kind: 'level', split: last, ...(reversed ? { corner: 'last' as const } : {}) };
+  points[splitId(last)] = { kind: 'split', split: last };
+  steps.push({ id: `l${++l}`, kind: 'line', from: splitId(last), to: 'lout', speed: 'cut' });
+  steps.push({ id: `l${++l}`, kind: 'line', from: 'lout', to: HOME, speed: 'jog' });
+  return { points, steps, template: reversed ? 'loop-reverse' : 'loop' };
 }
 
 export interface LeTeInput {

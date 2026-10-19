@@ -1,5 +1,5 @@
-import { arcLoop, sAtIndex, sliceS, spanS, withinS, wrapS, type ArcLoop } from '../geom/arc';
-import type { Profile } from '../geom/profile';
+import { arcClosed, arcLoop, pointAtS, sAtIndex, sliceS, spanS, withinS, wrapS, type ArcLoop } from '../geom/arc';
+import { isClosed, type Profile } from '../geom/profile';
 import type { Vec2 } from '../geom/vec';
 import type { SamplingSettings } from '../types';
 import { resamplePair } from './resample';
@@ -25,11 +25,18 @@ export interface SyncSettings {
   linked?: boolean[];
 }
 
-/** Default sync: entity boundaries + sharp corners, loop starting at the -X-most split. */
+/** Segments between n splits: a closed loop wraps back to the first split, an open contour doesn't. */
+export const segCount = (arc: ArcLoop, n: number) => (arcClosed(arc) ? n : Math.max(0, n - 1));
+
+/**
+ * Default sync: entity boundaries + sharp corners, loop starting at the -X-most split. Open
+ * contours start at their first point.
+ */
 export function autoSync(root: Profile, tip: Profile, cornerDeg: number): SyncSettings {
   const side = (p: Profile) => {
     const a = arcLoop(p);
     const splits = autoSplits(p, cornerDeg);
+    if (!isClosed(p)) return splits.map((i) => sAtIndex(a, i));
     const k = splits.indexOf(defaultStart(p, splits));
     return [...splits.slice(k), ...splits.slice(0, k)].map((i) => sAtIndex(a, i));
   };
@@ -46,7 +53,8 @@ export interface SyncedStation {
 /**
  * Resample every matched segment pair to equal point counts. Pins inside a segment split the
  * resampling (so the pin points line up) without starting a new segment.
- * Returns stations for the closed loop (no repeated closing station).
+ * Returns stations for the closed loop (no repeated closing station). An open contour also
+ * gets its end point as a last boundary station, numbered one past its last segment.
  */
 export function syncStations(
   rootArc: ArcLoop,
@@ -58,8 +66,9 @@ export function syncStations(
   const stations: SyncedStation[] = [];
   const warnings: string[] = [];
   const usedPins = new Set<number>();
+  const segs = segCount(rootArc, n);
 
-  for (let k = 0; k < n; k++) {
+  for (let k = 0; k < segs; k++) {
     const r0 = sync.root[k];
     const r1 = sync.root[(k + 1) % n];
     const t0 = sync.tip[k];
@@ -90,6 +99,9 @@ export function syncStations(
       for (let i = 0; i < a.length - 1; i++) stations.push({ r: a[i], t: b[i], seg: k, boundary: j === 0 && i === 0 });
     }
   }
+  if (!arcClosed(rootArc) && n) {
+    stations.push({ r: pointAtS(rootArc, sync.root[n - 1]), t: pointAtS(tipArc, sync.tip[n - 1]), seg: segs, boundary: true });
+  }
   sync.pins.forEach((_, i) => {
     if (!usedPins.has(i) && !warnings.some((w) => w.startsWith(`Pin ${i + 1} `))) {
       warnings.push(`Pin ${i + 1} is ignored: its root and tip points are in different segments.`);
@@ -98,10 +110,12 @@ export function syncStations(
   return { stations, warnings };
 }
 
+
+
 /** Segment k containing arc position s on the given side, and the fraction along it. */
 export function locate(arc: ArcLoop, splits: number[], s: number): { k: number; f: number } | null {
   const n = splits.length;
-  for (let k = 0; k < n; k++) {
+  for (let k = 0; k < segCount(arc, n); k++) {
     const a = splits[k];
     const b = splits[(k + 1) % n];
     if (withinS(arc, a, b, s)) return { k, f: wrapS(arc, s - a) / spanS(arc, a, b) };

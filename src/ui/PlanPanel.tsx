@@ -1,6 +1,6 @@
 import type { CutResult } from '../core/cut/pipeline';
 import { addSegment, bridgeGap, moveStep, removeStep, reverseStep, setSpeed } from '../core/plan/edit';
-import type { CutPlan, PlanPoint, PlanStep } from '../core/plan/model';
+import { segSplits, type CutPlan, type PlanPoint, type PlanStep, type Topo } from '../core/plan/model';
 import type { SegmentOverride } from '../core/types';
 
 interface Props {
@@ -48,19 +48,22 @@ function describePoint(id: string, plan: CutPlan): string {
       return `(${fmt(p.p.x)}, ${fmt(p.p.y)})`;
     case 'freePair':
       return `root (${fmt(p.r.x)}, ${fmt(p.r.y)}) / tip (${fmt(p.t.x)}, ${fmt(p.t.y)})`;
+    case 'level':
+      return `home X at split ${p.split + 1} height`;
   }
 }
 
-function describe(step: PlanStep, plan: CutPlan, n: number): string {
+function describe(step: PlanStep, plan: CutPlan, t: Topo): string {
   if (step.kind === 'segment') {
-    const a = step.seg + 1;
-    const b = ((step.seg + 1) % n) + 1;
-    return step.reversed ? `Segment ${a}  (split ${b} → ${a})` : `Segment ${a}  (split ${a} → ${b})`;
+    const e = segSplits(t, step.seg);
+    const a = e.start + 1;
+    const b = e.end + 1;
+    return step.reversed ? `Segment ${step.seg + 1}  (split ${b} → ${a})` : `Segment ${step.seg + 1}  (split ${a} → ${b})`;
   }
   return `${describePoint(step.from, plan)} → ${describePoint(step.to, plan)}`;
 }
 
-function GapRow(props: { before: number; plan: CutPlan; n: number; onChange: (p: CutPlan) => void }) {
+function GapRow(props: { before: number; plan: CutPlan; n: Topo; onChange: (p: CutPlan) => void }) {
   return (
     <div className="step gap">
       <span>Gap: the path jumps here</span>
@@ -74,6 +77,7 @@ function GapRow(props: { before: number; plan: CutPlan; n: number; onChange: (p:
 
 export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, onSelect, overrides, onOverride, units }: Props) {
   const n = result.stats.segments;
+  const topo = result.topology ?? n;
   const gapsBefore = new Set(result.gaps.map((g) => g.before));
   const stepWarn = new Set(result.warnings.flatMap((w) => (w.step === undefined ? [] : [w.step])));
   const uncut = result.path.length ? Array.from({ length: n }, (_, k) => k).filter((k) => !plan.steps.some((s) => s.kind === 'segment' && s.seg === k)) : [];
@@ -101,14 +105,14 @@ export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, on
       <ol className="steps">
         {plan.steps.map((s, i) => (
           <li key={s.id}>
-            {gapsBefore.has(i) && <GapRow before={i} plan={plan} n={n} onChange={onChange} />}
+            {gapsBefore.has(i) && <GapRow before={i} plan={plan} n={topo} onChange={onChange} />}
             <div
               className={`step ${s.kind === 'line' ? s.speed : 'segment'} ${selected === i ? 'selected' : ''} ${stepWarn.has(i) ? 'warned' : ''}`}
               onClick={() => onSelect(selected === i ? null : i)}
             >
               <span className="step-num">{i + 1}</span>
               <span className="step-desc">
-                {describe(s, plan, n)}
+                {describe(s, plan, topo)}
                 {s.kind === 'segment' && overrides[s.seg] && (
                   <span className="badge" title="This segment has its own kerf/speed">
                     {overrides[s.seg].kerf !== undefined ? `k ${overrides[s.seg].kerf}` : ''}
@@ -159,7 +163,7 @@ export function PlanPanel({ plan, result, onChange, onLoop, onLeTe, selected, on
         ))}
         {gapsBefore.has(plan.steps.length) && (
           <li>
-            <GapRow before={plan.steps.length} plan={plan} n={n} onChange={onChange} />
+            <GapRow before={plan.steps.length} plan={plan} n={topo} onChange={onChange} />
           </li>
         )}
       </ol>

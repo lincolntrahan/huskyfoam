@@ -1,6 +1,6 @@
-import { spanS, withinS, wrapS, type ArcLoop } from '../geom/arc';
-import type { CutPlan } from '../plan/model';
-import { remapInsert, remapRemove, remapRotate, type SegmentChange } from '../plan/remap';
+import { arcClosed, spanS, withinS, wrapS, type ArcLoop } from '../geom/arc';
+import { asTopology, type CutPlan, type Topology } from '../plan/model';
+import { remapInsert, remapRemove, remapRotate, segmentsAtSplit, type SegmentChange } from '../plan/remap';
 import { loopPlan } from '../plan/templates';
 import { atFraction, locate, type Pin, type SyncSettings } from './sync';
 
@@ -18,12 +18,32 @@ export interface SyncEdit {
   note?: string;
   /** Segment renumbering, if any (apply it to per-segment overrides). */
   change?: SegmentChange;
+  /** Contour pair the sync belongs to (0 = the outer contour, the default). */
+  pair?: number;
 }
 
 const other = (s: Side): Side => (s === 'root' ? 'tip' : 'root');
 
+/**
+ * Which contour pair a sync belongs to, so plan remaps use global split / segment numbers.
+ * Omitted: the sync is the only contour, a closed loop.
+ */
+export interface PairCtx {
+  topo: Topology;
+  pair: number;
+}
+
+const ctxOf = (sync: SyncSettings, ctx?: PairCtx) => {
+  const topo = ctx?.topo ?? asTopology(sync.root.length);
+  const c = topo.contours[ctx?.pair ?? 0];
+  return { topo, split0: c?.split0 ?? 0, seg0: c?.seg0 ?? 0 };
+};
+
+/** An open contour's end splits are fixed. */
+const isEnd = (arcs: Arcs, n: number, i: number) => !arcClosed(arcs.root) && (i === 0 || i === n - 1);
+
 /** Add a split at arc position s on one side; the partner goes at the same fraction on the other. */
-export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, side: Side, s: number): SyncEdit | null {
+export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, side: Side, s: number, ctx?: PairCtx): SyncEdit | null {
   const at = locate(arcs[side], sync[side], s);
   if (!at) return null; // on top of an existing split
   const partner = atFraction(arcs[other(side)], sync[other(side)], at.k, at.f);
@@ -31,7 +51,9 @@ export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, s
   next[side].splice(at.k + 1, 0, wrapS(arcs[side], s));
   next[other(side)].splice(at.k + 1, 0, partner);
   if (sync.linked) next.linked = [...sync.linked.slice(0, at.k + 1), false, ...sync.linked.slice(at.k + 1)];
-  return { sync: next, plan: plan && remapInsert(plan, at.k), change: { kind: 'insert', k: at.k } };
+  const { topo, seg0 } = ctxOf(sync, ctx);
+  const g = seg0 + at.k;
+  return { sync: next, plan: plan && remapInsert(plan, g, topo), change: { kind: 'insert', k: g } };
 }
 
 /**
@@ -41,6 +63,7 @@ export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, s
 export function moveSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, side: Side, i: number, s: number): SyncEdit | null {
   const list = sync[side];
   const n = list.length;
+  if (isEnd(arcs, n, i)) return null;
   // with one split the stretch is the whole loop from where it was; with 2 splits prev === next
   const prev = n > 1 ? list[(i - 1 + n) % n] : list[i];
   const next = n > 1 ? list[(i + 1) % n] : list[i];
@@ -68,31 +91,36 @@ export function setSplitLinked(sync: SyncSettings, arcs: Arcs, side: Side, i: nu
   return moveSplit(base, null, arcs, side, i, sync[side][i])?.sync ?? base;
 }
 
-/** Remove split pair i, merging its two segments. */
-export function removeSplit(sync: SyncSettings, plan: CutPlan | null, i: number): SyncEdit | null {
+/** Remove split pair i, merging its two segments (an open contour's end splits stay). */
+export function removeSplit(sync: SyncSettings, plan: CutPlan | null, i: number, ctx?: PairCtx, arcs?: Arcs): SyncEdit | null {
   const n = sync.root.length;
-  if (n < 2) return null;
+  if (n < 2 || (arcs && isEnd(arcs, n, i))) return null;
+  const { topo, split0 } = ctxOf(sync, ctx);
+  const at = segmentsAtSplit(topo, split0 + i);
+  if (!at) return null;
   const next = { ...sync, root: sync.root.filter((_, j) => j !== i), tip: sync.tip.filter((_, j) => j !== i) };
   if (sync.linked) next.linked = sync.linked.filter((_, j) => j !== i);
-  const change: SegmentChange = { kind: 'remove', i, n };
+  const change: SegmentChange = { kind: 'remove', i: at.after, n };
   if (!plan) return { sync: next, plan, change };
-  const remapped = remapRemove(plan, i, n);
+  const remapped = remapRemove(plan, split0 + i, topo);
   if (remapped) return { sync: next, plan: remapped, change };
   return {
     change,
     sync: next,
-    plan: loopPlan(n - 1),
-    note: `Removing split ${i + 1} broke the custom cut plan (it used that split or one of its segments on its own), so the plan was reset to Loop.`,
+    // with several contours the default plan rebuilds itself from the new splits
+    plan: ctx ? null : loopPlan(n - 1),
+    note: `Removing split ${split0 + i + 1} broke the custom cut plan (it used that split or one of its segments on its own), so the plan was reset to the default.`,
   };
 }
 
-/** Make split i the loop start (segment 1). */
-export function setLoopStart(sync: SyncSettings, plan: CutPlan | null, i: number): SyncEdit {
+/** Make split i the loop start (segment 1) of a closed contour. */
+export function setLoopStart(sync: SyncSettings, plan: CutPlan | null, i: number, ctx?: PairCtx): SyncEdit {
   const rot = <T,>(l: T[]) => [...l.slice(i), ...l.slice(0, i)];
   const n = sync.root.length;
+  const { topo, split0, seg0 } = ctxOf(sync, ctx);
   const next: SyncSettings = { ...sync, root: rot(sync.root), tip: rot(sync.tip) };
   if (sync.linked) next.linked = rot(sync.linked);
-  return { sync: next, plan: plan && remapRotate(plan, i, n), change: { kind: 'rotate', i, n } };
+  return { sync: next, plan: plan && remapRotate(plan, split0 + i, topo), change: { kind: 'rotate', i, n, base: seg0 } };
 }
 
 /** Add a pin at s on one side, paired at the same fraction of the segment on the other side. */

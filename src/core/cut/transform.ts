@@ -1,5 +1,5 @@
 import { applyAffine, chain, invert, rotation, scaleXY, translate, type Affine } from '../geom/affine';
-import { wrapS, type ArcLoop } from '../geom/arc';
+import { arcClosed, wrapS, type ArcLoop } from '../geom/arc';
 import { resolveChord } from '../geom/chord';
 import type { Profile } from '../geom/profile';
 import { add, lerp, type Vec2 } from '../geom/vec';
@@ -85,41 +85,48 @@ export function sideTransform(p: Profile, arc: ArcLoop, t: ProfileTransform, fli
 }
 
 /** Transform a raw profile; mirrored outlines are reversed so they stay CCW (kerf stays outside). */
+/**
+ * Transform a raw contour. Mirrored contours are reversed so closed ones stay CCW (kerf stays
+ * outside) and open ones keep their kerf on the same side of the material.
+ */
 export function applyToProfile(p: Profile, st: SideTransform): Profile {
   const pts = p.pts.map((q) => applyAffine(st.affine, q));
-  if (!st.mirrored) return { pts, breaks: p.breaks.slice() };
+  if (!st.mirrored) return { ...p, pts, breaks: p.breaks.slice() };
   const n = pts.length;
-  return { pts: pts.reverse(), breaks: p.breaks.map((b) => (n - 1 - b + n) % n).sort((a, b) => a - b) };
+  return { ...p, pts: pts.reverse(), breaks: p.breaks.map((b) => (n - 1 - b + n) % n).sort((a, b) => a - b) };
 }
 
-// Arc positions: raw outline <-> transformed outline.
-function sToT(st: SideTransform, rawLen: number, s: number): number {
+// Arc positions: raw outline <-> transformed outline (for any contour of that side).
+// Raw arc position of the reversed outline's first point: the last dense vertex (closed) or the end (open).
+const lastS = (raw: ArcLoop) => (arcClosed(raw) ? raw.cum[raw.pts.length - 2] : raw.length);
+function sToT(st: SideTransform, raw: ArcLoop, s: number): number {
   if (!st.mirrored) return st.k * s;
+  if (!arcClosed(raw)) return st.k * (raw.length - s);
   // the reversed outline starts at raw pts[n-1] and runs backwards
-  return st.k * ((((st.lastS - s) % rawLen) + rawLen) % rawLen);
+  return st.k * ((((lastS(raw) - s) % raw.length) + raw.length) % raw.length);
 }
-const sToRaw = (st: SideTransform, rawArc: ArcLoop, sT: number) => (st.mirrored ? wrapS(rawArc, st.lastS - sT / st.k) : sT / st.k);
-// A mirrored outline runs the other way: keep the loop start, reverse the rest.
-const reorder = <T,>(list: T[], mirrored: boolean) => (mirrored ? [list[0], ...list.slice(1).reverse()] : list);
+const sToRaw = (st: SideTransform, raw: ArcLoop, sT: number) => (st.mirrored ? wrapS(raw, lastS(raw) - sT / st.k) : sT / st.k);
+// A mirrored loop runs the other way: keep the loop start, reverse the rest. An open contour reverses entirely.
+const reorder = <T,>(list: T[], mirrored: boolean, closed = true) => (!mirrored ? list : closed ? [list[0], ...list.slice(1).reverse()] : list.slice().reverse());
 // flips apply to both profiles, so the root's direction stands for both
-const withLinked = (sync: SyncSettings, mirrored: boolean) => (sync.linked ? { linked: reorder(sync.linked, mirrored) } : {});
+const withLinked = (sync: SyncSettings, mirrored: boolean, closed: boolean) => (sync.linked ? { linked: reorder(sync.linked, mirrored, closed) } : {});
 
 export function syncToTransformed(sync: SyncSettings, st: { root: SideTransform; tip: SideTransform }, raw: { root: ArcLoop; tip: ArcLoop }): SyncSettings {
-  const side = (k: 'root' | 'tip') => reorder(sync[k].map((s) => sToT(st[k], raw[k].length, s)), st[k].mirrored);
+  const side = (k: 'root' | 'tip') => reorder(sync[k].map((s) => sToT(st[k], raw[k], s)), st[k].mirrored, arcClosed(raw[k]));
   return {
     root: side('root'),
     tip: side('tip'),
-    pins: sync.pins.map((p) => ({ root: sToT(st.root, raw.root.length, p.root), tip: sToT(st.tip, raw.tip.length, p.tip), ...(p.linked ? { linked: true } : {}) })),
-    ...withLinked(sync, st.root.mirrored),
+    pins: sync.pins.map((p) => ({ root: sToT(st.root, raw.root, p.root), tip: sToT(st.tip, raw.tip, p.tip), ...(p.linked ? { linked: true } : {}) })),
+    ...withLinked(sync, st.root.mirrored, arcClosed(raw.root)),
   };
 }
 
 export function syncToRaw(sync: SyncSettings, st: { root: SideTransform; tip: SideTransform }, raw: { root: ArcLoop; tip: ArcLoop }): SyncSettings {
-  const side = (k: 'root' | 'tip') => reorder(sync[k], st[k].mirrored).map((s) => sToRaw(st[k], raw[k], s));
+  const side = (k: 'root' | 'tip') => reorder(sync[k], st[k].mirrored, arcClosed(raw[k])).map((s) => sToRaw(st[k], raw[k], s));
   return {
     root: side('root'),
     tip: side('tip'),
     pins: sync.pins.map((p) => ({ root: sToRaw(st.root, raw.root, p.root), tip: sToRaw(st.tip, raw.tip, p.tip), ...(p.linked ? { linked: true } : {}) })),
-    ...withLinked(sync, st.root.mirrored),
+    ...withLinked(sync, st.root.mirrored, arcClosed(raw.root)),
   };
 }
