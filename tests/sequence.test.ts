@@ -208,3 +208,14 @@ describe('editing the tree', () => {
     expect(res.gaps).toEqual([]);
   });
 });
+
+describe('step colours', () => {
+  it('ties each step to its pair (or none for the jog home)', async () => {
+    const { stepPair } = await import('../src/core/plan/tree');
+    const plan = sequenceAll(topo, order(base));
+    plan.steps.forEach((s, i) => {
+      const g = plan.groups!.find((x) => x.id === s.group);
+      expect(stepPair(plan, topo, i)).toBe(g ? g.pair : -1);
+    });
+  });
+});

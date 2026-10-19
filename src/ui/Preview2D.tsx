@@ -10,6 +10,7 @@ import type { PathPt } from '../core/plan/walk';
 import { addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
 import { isLinked, locate } from '../core/sync/sync';
 import { pairColor } from './DxfPicker';
+import { stepPair } from '../core/plan/tree';
 import type { Pick } from './PlanPanel';
 import type { MachinePreset } from '../core/types';
 import type { StepId } from './steps';
@@ -62,6 +63,8 @@ interface Props {
   onPickSegment?: (seg: number, reversed: boolean) => void;
   onPickLine?: (through: PlanPoint[], endSplit: number | null) => void;
   onCancelPick?: () => void;
+  /** Insert at the point a jog ends: moves the rollback bar after that step and starts a pick. */
+  onInsertAfter?: (step: number, pick: Pick) => void;
 }
 
 interface Box {
@@ -73,6 +76,7 @@ interface Box {
 
 type Menu =
   | { kind: 'split'; k: number; side: Side; sx: number; sy: number }
+  | { kind: 'jognode'; step: number; sx: number; sy: number }
   | { kind: 'line'; step: number; at: Vec2; sx: number; sy: number }
   | { kind: 'profile'; side: Side; pair: number; s: number; sx: number; sy: number }
   | { kind: 'pin'; i: number; side: Side; sx: number; sy: number };
@@ -146,7 +150,6 @@ function Outline(props: {
   return props.closed ? <polygon {...common}>{title}</polygon> : <polyline {...common}>{title}</polyline>;
 }
 
-const speedColor = (s: PathPt['speed']) => (s === 'jog' ? 'var(--jog)' : s === 'gap' ? 'var(--err)' : 'var(--cut)');
 
 export function Preview2D(props: Props) {
   const { root, tip, offset, result, machine, layers, block, plan, onPlanChange } = props;
@@ -406,6 +409,13 @@ export function Preview2D(props: Props) {
 
   // Sequence Cuts draws each contour pair in its pair colour
   const byPair = props.mode === 'sequence';
+  // cut paths take their pair's colour (white when not tied to one); jogs are dashed
+  const runColors = [...pairs.map((_, i) => pairColor(i, 'var(--root)')), 'var(--text)'];
+  const runColorIndex = (step: number) => {
+    const p = plan && topo ? stepPair(plan, topo, step) : -1;
+    return p < 0 ? runColors.length - 1 : p;
+  };
+  const runColor = (run: { step: number; speed: PathPt['speed'] }) => (run.speed === 'gap' ? 'var(--err)' : runColors[runColorIndex(run.step)]);
   const edit = {
     sync: props.mode === 'segment',
     chord: props.mode === 'transform',
@@ -445,7 +455,7 @@ export function Preview2D(props: Props) {
       if (run.step < 0 || run.speed === 'gap') continue;
       const main = showR ? run.r : run.t;
       const m = main[Math.floor((main.length - 1) / 2)];
-      labels.push({ key: `r-${run.step}-${run.speed}`, x: m.x, y: -m.y, text: String(run.step + 1), color: speedColor(run.speed), prio: 3 });
+      labels.push({ key: `r-${run.step}-${run.speed}`, x: m.x, y: -m.y, text: String(run.step + 1), color: runColor(run), prio: 3 });
     }
   }
   const fontSize = unit * 1.2;
@@ -619,9 +629,9 @@ export function Preview2D(props: Props) {
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
-          {(['cut', 'jog'] as const).map((s) => (
-            <marker key={s} id={`arrow-${s}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={unit * 0.5} markerHeight={unit * 0.5} orient="auto" markerUnits="userSpaceOnUse">
-              <path d="M0,0 L10,5 L0,10 z" fill={speedColor(s)} />
+          {runColors.map((c, i) => (
+            <marker key={i} id={`arrow-${i}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={unit * 0.5} markerHeight={unit * 0.5} orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L10,5 L0,10 z" fill={c} />
             </marker>
           ))}
         </defs>
@@ -680,14 +690,14 @@ export function Preview2D(props: Props) {
             )}
           {layers.plan &&
             runs.map((run, i) => {
-              const color = speedColor(run.speed);
+              const color = runColor(run);
               const sel = props.selectedStep === run.step;
               const dimmed = props.selectedStep !== null && !sel;
               const dash = run.speed === 'cut' ? undefined : '6 4';
               const width = sel ? 5 : 2;
               const main = showR ? run.r : run.t;
               const mid = Math.floor((main.length - 1) / 2);
-              const arrow = run.speed === 'gap' ? undefined : `url(#arrow-${run.speed})`;
+              const arrow = run.speed === 'gap' ? undefined : `url(#arrow-${runColorIndex(run.step)})`;
               const clickLine = (e: React.MouseEvent) => {
                 e.stopPropagation();
                 if (drawing || !edit.plan) return;
@@ -705,6 +715,36 @@ export function Preview2D(props: Props) {
                 </g>
               );
             })}
+          {/* jog nodes: click where a jog ends to insert after it */}
+          {edit.plan &&
+            layers.plan &&
+            !drawing &&
+            runs
+              .filter((run) => run.speed === 'jog' && run.step >= 0)
+              .map((run) => {
+                const main = showR ? run.r : run.t;
+                const end = main[main.length - 1];
+                return (
+                  <circle
+                    key={`jn-${run.step}`}
+                    className="clickable"
+                    cx={end.x}
+                    cy={-end.y}
+                    r={unit * 0.35}
+                    fill="var(--canvas)"
+                    stroke={runColor(run)}
+                    strokeWidth={unit * 0.12}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onSelectStep(run.step);
+                      setMenu({ kind: 'jognode', step: run.step, ...toWrap(e.clientX, e.clientY) });
+                    }}
+                  >
+                    <title>{`End of jog (step ${run.step + 1}): click to add a segment, jog or cut line after it`}</title>
+                  </circle>
+                );
+              })}
           {drawing && lastDrawPt && (
             <polyline
               points={pts([drawStart!, ...drawing.pts, ...(drawing.cursor ? [drawing.cursor] : [])])}
@@ -816,6 +856,13 @@ export function Preview2D(props: Props) {
                   const pr = pairs[menu.pair];
                   syncEdit(menu.pair, addSplit(pr.sync, plan, pr.arcs, menu.side, menu.s, ctxFor(menu.pair)));
                 })}
+            </>
+          ) : menu.kind === 'jognode' ? (
+            <>
+              <div className="popover-title">After step {menu.step + 1} (jog)</div>
+              {menuItem('+ Segment here…', () => props.onInsertAfter?.(menu.step, 'segment'))}
+              {menuItem('+ Cut line from here…', () => props.onInsertAfter?.(menu.step, 'line'))}
+              {menuItem('+ Jog to a split…', () => props.onInsertAfter?.(menu.step, 'jog'))}
             </>
           ) : menu.kind === 'pin' ? (
             <>
