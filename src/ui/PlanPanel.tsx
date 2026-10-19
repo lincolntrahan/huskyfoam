@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { CutResult } from '../core/cut/pipeline';
 import { bridgeGap, removeStep, reverseStep, setSpeed } from '../core/plan/edit';
 import { clonePlan, segSplits, type CutPlan, type PlanPoint, type PlanStep, type Topo } from '../core/plan/model';
-import { addGroup, moveGroupTo, moveStepTo, removeGroup, renameGroup, TEMPLATE_LABEL, type PairTemplate } from '../core/plan/tree';
+import { addGroup, moveGroupTo, moveStepTo, removeGroup, renameGroup, stepPair, TEMPLATE_LABEL, type PairTemplate } from '../core/plan/tree';
 import type { SegmentOverride } from '../core/types';
 import { pairColor } from './DxfPicker';
 
@@ -173,6 +173,12 @@ export function PlanPanel(props: Props) {
     </div>
   );
 
+  /** Steps are drawn in their pair's colour: a solid edge for cuts, dashed for jogs. */
+  const edge = (s: PlanStep, i: number): React.CSSProperties => {
+    const p = stepPair(plan, topo, i);
+    const jog = s.kind === 'jog' || (s.kind === 'line' && s.speed === 'jog');
+    return { borderLeft: `4px ${jog ? 'dashed' : 'solid'} ${p < 0 ? 'var(--text)' : pairColor(p, 'var(--root)')}` };
+  };
   const stepRow = (s: PlanStep, i: number) => (
     <li key={s.id} {...target({ before: i, group: s.group })} className={isDropAt(i, s.group) ? 'drop-before' : ''}>
       {props.bar === i && bar}
@@ -180,6 +186,7 @@ export function PlanPanel(props: Props) {
       <div
         className={`step ${s.kind === 'line' ? s.speed : s.kind === 'jog' ? 'jog' : 'segment'} ${selected === i ? 'selected' : ''} ${stepWarn.has(i) ? 'warned' : ''} ${i >= props.bar ? 'rolled' : ''}`}
         onClick={() => onSelect(selected === i ? null : i)}
+        style={edge(s, i)}
         {...dragSource({ kind: 'step', i })}
       >
         <span className="step-num">{i + 1}</span>

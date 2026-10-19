@@ -114,6 +114,8 @@ The canvas shows each profile's chord line with LE/TE labels and a cross at the 
 - **The step list is a tree**: drag steps and folders to reorder them, drop a step on a folder's name to put it in, and rename (double-click), un-folder (⇱) or delete folders.
 - **Rollback bar**: drag it up the list to see the cut only up to that point (2D, 3D and playback). Steps below it are greyed out. Export always writes the whole sequence.
 - **Insert at the bar**: *+ Jog to split* (then click a split marker), *+ Jog home*, *+ Cut line* (then click points; click a split to end there), *+ Segment* (then click a profile segment), *+ Folder*.
+- **Colours**: every step (in the list and on the canvas) takes the colour of the contour pair it cuts; cuts are solid, jogs dashed. Steps not tied to a pair (like the jog home) are white.
+- **Jog nodes**: click the dot at the end of a jog on the canvas to add a segment, a cut line or another jog right after it (the rollback bar moves there).
 - **Selecting** a step (in the list, or by clicking its path or segment on the canvas) draws it thick and bright and dims the rest.
 - **Click a split marker** to get these options:
   - *Run out from here*: click to place points, then click another split marker to run back in, or press Enter / double-click to stop.

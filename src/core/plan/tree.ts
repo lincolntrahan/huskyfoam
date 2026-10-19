@@ -1,6 +1,8 @@
 import {
   asTopology,
   clonePlan,
+  contourOfSeg,
+  contourOfSplit,
   emptyPlan,
   HOME,
   newId,
@@ -153,6 +155,24 @@ export function sequenceAll(t: Topo, innerOrder: number[]): CutPlan {
   const inner = innerOrder.filter((k) => k > 0 && k < topo.contours.length);
   for (const k of inner) p = applyPairTemplate(p, topo, k, 'loop', p.steps.length);
   return applyPairTemplate(p, topo, 0, 'loop', p.steps.length);
+}
+
+/**
+ * The contour pair a step works on (for colouring it): a segment's pair, else its folder's pair,
+ * else the pair of a split it goes to or from; -1 when it isn't tied to one (e.g. the jog home).
+ */
+export function stepPair(plan: CutPlan, t: Topo, i: number): number {
+  const topo = asTopology(t);
+  const s = plan.steps[i];
+  if (!s) return -1;
+  if (s.kind === 'segment') return contourOfSeg(topo, s.seg);
+  const g = s.group ? plan.groups?.find((x) => x.id === s.group) : undefined;
+  if (g?.pair !== undefined) return g.pair;
+  for (const id of s.kind === 'line' ? [s.to, s.from] : [s.to]) {
+    const p = plan.points[id];
+    if (p && (p.kind === 'split' || p.kind === 'above' || p.kind === 'level')) return contourOfSplit(topo, p.split);
+  }
+  return -1;
 }
 
 // ---------------------------------------------------------------- tree edits

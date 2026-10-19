@@ -491,6 +491,10 @@ export function App() {
               onPickSegment={onPickSegment}
               onPickLine={onPickLine}
               onCancelPick={() => setPick(null)}
+              onInsertAfter={(step, p) => {
+                setBar(step + 1);
+                setPick(p);
+              }}
               plan={plan}
               onPlanChange={(p) => patch({ plan: p })}
               outBackDistance={outBack}
@@ -551,10 +555,10 @@ export function App() {
                   (cap {machine.maxSpeed})
                 </span>
                 <span>
-                  <span className="swatch" style={{ background: 'var(--cut)' }} />
+                  <span className="line-key" />
                   cut
-                  <span className="swatch" style={{ background: 'var(--jog)', marginLeft: 8 }} />
-                  jog
+                  <span className="line-key dashed" style={{ marginLeft: 8 }} />
+                  jog (coloured by pair)
                   <span className="swatch" style={{ background: 'var(--rootcar)', marginLeft: 8 }} />
                   root
                   <span className="swatch" style={{ background: 'var(--tipcar)', marginLeft: 8 }} />
