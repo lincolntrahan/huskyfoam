@@ -12,16 +12,16 @@ export interface StepDef {
   layers: Layers;
 }
 
-const L = (profiles: boolean, kerf: boolean, plan: boolean, wires: boolean, carriages: boolean): Layers => ({ profiles, kerf, plan, wires, carriages });
+const L = (profiles: boolean, kerf: boolean, plan: boolean, carriages: boolean): Layers => ({ profiles, kerf, plan, carriages });
 
 export const STEPS: StepDef[] = [
-  { id: 'import', label: 'Import Geometry', stage: 'import', layers: L(true, false, false, false, false) },
-  { id: 'setup', label: 'Define Setup', stage: 'setup', layers: L(true, true, false, false, true) },
-  { id: 'transform', label: 'Transform Profiles', stage: 'transform', layers: L(true, false, false, true, false) },
-  { id: 'segment', label: 'Segment Profiles', stage: 'segment', layers: L(true, false, false, true, false) },
-  { id: 'sequence', label: 'Sequence Cuts', stage: 'sequence', layers: L(true, true, true, false, false) },
-  { id: 'preview', label: 'Preview Cut Path', stage: 'path', layers: L(true, true, true, true, true) },
-  { id: 'export', label: 'Export G-Code', stage: null, layers: L(true, false, true, false, true) },
+  { id: 'import', label: 'Import Geometry', stage: 'import', layers: L(true, false, false, false) },
+  { id: 'setup', label: 'Define Setup', stage: 'setup', layers: L(true, true, false, true) },
+  { id: 'transform', label: 'Transform Profiles', stage: 'transform', layers: L(true, false, false, false) },
+  { id: 'segment', label: 'Segment Profiles', stage: 'segment', layers: L(true, false, false, false) },
+  { id: 'sequence', label: 'Sequence Cuts', stage: 'sequence', layers: L(true, true, true, false) },
+  { id: 'preview', label: 'Preview Cut Path', stage: 'path', layers: L(true, true, true, true) },
+  { id: 'export', label: 'Export G-Code', stage: null, layers: L(true, false, true, true) },
 ];
 
 const STAGE_ORDER: Stage[] = ['import', 'setup', 'transform', 'segment', 'sequence', 'path'];

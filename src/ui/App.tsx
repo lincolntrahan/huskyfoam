@@ -57,7 +57,7 @@ export function App() {
     setJob((j) => ({
       ...j,
       cutSpeed: mat.cutSpeed,
-      kerf: { ...j.kerf, root: mat.kerfRoot, tip: mat.kerfTip },
+      kerf: { mode: mat.kerfMode ?? 'fixed', root: mat.kerfRoot, tip: mat.kerfTip },
       kerfTable: mat.kerfTable ?? [],
       dwell: mat.cornerDwell ?? j.dwell,
       wireWatts: mat.wireWatts ?? null,
@@ -160,10 +160,9 @@ export function App() {
     patch({ sync: result.syncToJob(e.sync), plan: e.plan, segmentOverrides });
     setNotice(e.note ?? null);
   };
-  const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', k: number) => {
-    if (!result?.sync || !result.rawS) return;
-    const s = result.rawS(side, result.sync[side][k]);
-    patch({ transforms: { ...job.transforms, [side]: { ...job.transforms[side], [end]: s } } });
+  const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', sCut: number) => {
+    if (!result?.rawS) return;
+    patch({ transforms: { ...job.transforms, [side]: { ...job.transforms[side], [end]: result.rawS(side, sCut) } } });
   };
 
   const loadExample = () => {
@@ -231,6 +230,10 @@ export function App() {
     applyLeTe,
     baseName,
     setNotice,
+    resetProject: () => {
+      if (!rootFile && !tipFile) return startFresh();
+      if (window.confirm('Reset the project? This clears both profiles and every job setting. Your saved machine and material presets are kept.')) startFresh();
+    },
   };
 
   // ---- problems: this page's and every earlier page's (Export shows all)
@@ -341,7 +344,6 @@ export function App() {
                   ['profiles', 'Profiles'],
                   ['kerf', 'Kerf loop'],
                   ['plan', 'Cut plan'],
-                  ['wires', 'Wire lines'],
                   ['carriages', 'Carriage paths'],
                 ] as [keyof Layers, string][]
               ).map(([k, label]) => (

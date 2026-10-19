@@ -18,7 +18,6 @@ export interface Layers {
   profiles: boolean;
   kerf: boolean;
   plan: boolean;
-  wires: boolean;
   carriages: boolean;
 }
 
@@ -45,7 +44,7 @@ interface Props {
   /** Receives edits in cut space (result.sync numbering); the App stores them. */
   onSyncChange: (e: SyncEdit) => void;
   /** Use split k on one profile as its LE or TE (for the twist pivot). */
-  onChordPick: (side: Side, end: 'le' | 'te', k: number) => void;
+  onChordPick: (side: Side, end: 'le' | 'te', s: number) => void;
 }
 
 interface Box {
@@ -251,33 +250,27 @@ export function Preview2D(props: Props) {
     capture(e.pointerId);
   };
 
-  const markers = (side: Side, color: string, dy: number) =>
+  const markers = (side: Side, color: string) =>
     result?.splitPts[side].map((p, k) => {
       const x = p.x;
       const y = -p.y;
       return (
         <g key={`${color}-${k}`} className="clickable" onPointerDown={startSyncDrag('split', side, k)}>
           <title>{`Split ${k + 1}: click for options, drag to slide along the profile`}</title>
-          <circle cx={x} cy={y} r={unit * 1.2} fill="transparent" />
-          <circle cx={x} cy={y} r={unit * (k === 0 ? 0.9 : 0.55)} fill={k === 0 ? color : 'var(--canvas)'} stroke={color} strokeWidth={unit * 0.2} />
-          <text x={x + unit * 0.9} y={y + dy * unit} fontSize={unit * 1.6} fill={color}>
-            {k === 0 ? `${k + 1} start` : k + 1}
-          </text>
+          <circle cx={x} cy={y} r={unit * 0.8} fill="transparent" />
+          <circle cx={x} cy={y} r={unit * (k === 0 ? 0.27 : 0.17)} fill={k === 0 ? color : 'var(--canvas)'} stroke={color} strokeWidth={unit * 0.07} />
         </g>
       );
     });
 
-  const pins = (side: Side, dy: number) =>
+  const pins = (side: Side) =>
     result?.pinPts[side].map((p, i) => {
-      const r = unit * 0.75;
+      const r = unit * 0.3;
       return (
         <g key={`pin-${side}-${i}`} className="clickable" onPointerDown={startSyncDrag('pin', side, i)}>
           <title>{`Pin ${i + 1}: click for options, drag to slide along the profile`}</title>
-          <circle cx={p.x} cy={-p.y} r={unit * 1.2} fill="transparent" />
+          <circle cx={p.x} cy={-p.y} r={unit * 0.8} fill="transparent" />
           <rect x={p.x - r / 2} y={-p.y - r / 2} width={r} height={r} transform={`rotate(45 ${p.x} ${-p.y})`} fill="var(--pin)" />
-          <text x={p.x + unit * 0.9} y={-p.y + dy * unit} fontSize={unit * 1.4} fill="var(--pin)">
-            P{i + 1}
-          </text>
         </g>
       );
     });
@@ -291,8 +284,6 @@ export function Preview2D(props: Props) {
         <line x1={c.le.x} y1={-c.le.y} x2={c.te.x} y2={-c.te.y} strokeDasharray="1 3" vectorEffect="non-scaling-stroke" />
         <line x1={c.pivot.x - r} y1={-c.pivot.y - r} x2={c.pivot.x + r} y2={-c.pivot.y + r} vectorEffect="non-scaling-stroke" />
         <line x1={c.pivot.x - r} y1={-c.pivot.y + r} x2={c.pivot.x + r} y2={-c.pivot.y - r} vectorEffect="non-scaling-stroke" />
-        <text x={c.le.x} y={-c.le.y + unit * 2.6} fontSize={unit * 1.2} fill={color} stroke="none" textAnchor="middle">LE</text>
-        <text x={c.te.x} y={-c.te.y + unit * 2.6} fontSize={unit * 1.2} fill={color} stroke="none" textAnchor="middle">TE</text>
       </g>
     );
   };
@@ -303,19 +294,73 @@ export function Preview2D(props: Props) {
     setMenu({ kind: 'profile', side, s: sOnProfile(side, toWorld(e.clientX, e.clientY)), ...toWrap(e.clientX, e.clientY) });
   };
 
-  const wireLines = (() => {
-    const ks = result?.kerfStations ?? [];
-    if (!layers.wires || !showR || !showT || ks.length < 2) return [];
-    const every = Math.max(1, Math.floor(ks.length / 90));
-    return ks.filter((s, i) => i % every === 0 || s.boundary);
-  })();
 
   const edit = {
     sync: props.mode === 'segment',
     chord: props.mode === 'transform',
     plan: props.mode === 'sequence',
   };
-  const showMarkers = edit.sync || edit.chord || edit.plan;
+  // split markers belong to the outlines (hidden with them) and only matter once you segment
+  const showMarkers = layers.profiles && (edit.sync || edit.plan);
+
+  // ---- labels: collected here, then placed so they never overlap (lower prio wins a spot first)
+  interface Label {
+    key: string;
+    x: number;
+    y: number; // svg coordinates (y down)
+    text: string;
+    color: string;
+    prio: number;
+  }
+  const labels: Label[] = [];
+  if (result && showMarkers) {
+    (['root', 'tip'] as Side[]).forEach((side) => {
+      if (side === 'root' ? !showR : !showT) return;
+      const color = side === 'root' ? 'var(--root)' : 'var(--tip)';
+      result.splitPts[side].forEach((p, k) => labels.push({ key: `s-${side}-${k}`, x: p.x, y: -p.y, text: k === 0 ? '1 start' : String(k + 1), color, prio: k === 0 ? 0 : 2 }));
+      if (edit.sync) result.pinPts[side].forEach((p, i) => labels.push({ key: `p-${side}-${i}`, x: p.x, y: -p.y, text: `P${i + 1}`, color: 'var(--pin)', prio: 1 }));
+    });
+  }
+  if (result?.chord && edit.chord && layers.profiles) {
+    (['root', 'tip'] as Side[]).forEach((side) => {
+      if (side === 'root' ? !showR : !showT) return;
+      const c = result.chord![side];
+      const color = side === 'root' ? 'var(--root)' : 'var(--tip)';
+      labels.push({ key: `le-${side}`, x: c.le.x, y: -c.le.y, text: 'LE', color, prio: 0 }, { key: `te-${side}`, x: c.te.x, y: -c.te.y, text: 'TE', color, prio: 0 });
+    });
+  }
+  if (layers.plan) {
+    for (const run of runs) {
+      if (run.step < 0 || run.speed === 'gap') continue;
+      const main = showR ? run.r : run.t;
+      const m = main[Math.floor((main.length - 1) / 2)];
+      labels.push({ key: `r-${run.step}-${run.speed}`, x: m.x, y: -m.y, text: String(run.step + 1), color: speedColor(run.speed), prio: 3 });
+    }
+  }
+  const fontSize = unit * 1.2;
+  const placed = (() => {
+    const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const out: (Label & { tx: number; ty: number })[] = [];
+    const pad = fontSize * 0.15;
+    for (const l of [...labels].sort((a, b) => a.prio - b.prio)) {
+      const w = l.text.length * fontSize * 0.6;
+      // try: right-above, right-below, left-above, left-below of the point
+      const tries = [
+        [fontSize * 0.5, -fontSize * 0.35],
+        [fontSize * 0.5, fontSize * 1.05],
+        [-w - fontSize * 0.5, -fontSize * 0.35],
+        [-w - fontSize * 0.5, fontSize * 1.05],
+      ];
+      for (const [dx, dy] of tries) {
+        const b = { x0: l.x + dx - pad, y0: l.y + dy - fontSize - pad, x1: l.x + dx + w + pad, y1: l.y + dy + pad };
+        if (boxes.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0)) continue;
+        boxes.push(b);
+        out.push({ ...l, tx: l.x + dx, ty: l.y + dy });
+        break;
+      }
+    }
+    return out;
+  })();
 
   const handles =
     plan && layers.plan && edit.plan
@@ -438,7 +483,7 @@ export function Preview2D(props: Props) {
       >
         <defs>
           {(['cut', 'jog'] as const).map((s) => (
-            <marker key={s} id={`arrow-${s}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={unit * 1.6} markerHeight={unit * 1.6} orient="auto" markerUnits="userSpaceOnUse">
+            <marker key={s} id={`arrow-${s}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={unit * 0.5} markerHeight={unit * 0.5} orient="auto" markerUnits="userSpaceOnUse">
               <path d="M0,0 L10,5 L0,10 z" fill={speedColor(s)} />
             </marker>
           ))}
@@ -454,9 +499,6 @@ export function Preview2D(props: Props) {
               {showRight && <polyline points={pts(carriage.right)} stroke="var(--right)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" />}
             </>
           )}
-          {wireLines.map((s, i) => (
-            <line key={i} x1={s.r.x} y1={-s.r.y} x2={s.t.x} y2={-s.t.y} stroke="var(--wire)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-          ))}
           {layers.profiles && (
             <>
               {showR && <polygon points={pts(rootPts)} stroke="var(--root)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
@@ -491,11 +533,6 @@ export function Preview2D(props: Props) {
                   {arrow && main.length >= 2 && <polyline points={pts([main[mid], main[mid + 1]])} stroke="none" markerEnd={arrow} />}
                   {showR && <polyline className="clickable" points={pts(run.r)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />}
                   {showT && <polyline className="clickable" points={pts(run.t)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />}
-                  {run.step >= 0 && run.speed !== 'gap' && (
-                    <text x={main[mid].x} y={-main[mid].y - unit * 0.8} fontSize={unit * 1.3} fill={color} stroke="none" textAnchor="middle">
-                      {run.step + 1}
-                    </text>
-                  )}
                 </g>
               );
             })}
@@ -509,16 +546,16 @@ export function Preview2D(props: Props) {
             />
           )}
         </g>
-        {layers.profiles && arcs && !drawing && edit.sync && (
+        {layers.profiles && arcs && !drawing && (edit.sync || edit.chord) && (
           <g fill="none">
             {showR && (
               <polygon className="clickable" points={pts(rootPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('root', e)}>
-                <title>Click to add a split or pin</title>
+                <title>{edit.chord ? 'Click to set the LE or TE here' : 'Click to add a split or pin'}</title>
               </polygon>
             )}
             {showT && (
               <polygon className="clickable" points={pts(tipPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('tip', e)}>
-                <title>Click to add a split or pin</title>
+                <title>{edit.chord ? 'Click to set the LE or TE here' : 'Click to add a split or pin'}</title>
               </polygon>
             )}
           </g>
@@ -531,10 +568,17 @@ export function Preview2D(props: Props) {
           ))}
         {result?.chord && edit.chord && showR && chordMarks('root', 'var(--root)')}
         {result?.chord && edit.chord && showT && chordMarks('tip', 'var(--tip)')}
-        {result && edit.sync && showR && pins('root', -0.6)}
-        {result && edit.sync && showT && pins('tip', 2)}
-        {result && showMarkers && showR && markers('root', 'var(--root)', -0.6)}
-        {result && showMarkers && showT && markers('tip', 'var(--tip)', 2)}
+        {result && showMarkers && edit.sync && showR && pins('root')}
+        {result && showMarkers && edit.sync && showT && pins('tip')}
+        {result && showMarkers && showR && markers('root', 'var(--root)')}
+        {result && showMarkers && showT && markers('tip', 'var(--tip)')}
+        <g pointerEvents="none" className="labels">
+          {placed.map((l) => (
+            <text key={l.key} x={l.tx} y={l.ty} fontSize={fontSize} fill={l.color}>
+              {l.text}
+            </text>
+          ))}
+        </g>
         {handles}
       </svg>
 
@@ -553,8 +597,6 @@ export function Preview2D(props: Props) {
               {edit.plan && menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
               {edit.plan && menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
               {edit.sync && sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
-              {edit.chord && menuItem(`Use as ${menu.side} LE (twist pivot)`, () => props.onChordPick(menu.side, 'le', menu.k))}
-              {edit.chord && menuItem(`Use as ${menu.side} TE (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.k))}
               {edit.sync &&
                 sync &&
                 sync.root.length > 1 &&
@@ -566,13 +608,17 @@ export function Preview2D(props: Props) {
           ) : menu.kind === 'profile' ? (
             <>
               <div className="popover-title">{menu.side === 'root' ? 'Root' : 'Tip'} profile</div>
-              {sync &&
+              {edit.chord && menuItem(`Use as ${menu.side} LE here (twist pivot)`, () => props.onChordPick(menu.side, 'le', menu.s))}
+              {edit.chord && menuItem(`Use as ${menu.side} TE here (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.s))}
+              {edit.sync &&
+                sync &&
                 arcs &&
                 menuItem('Add split here (+ matching one on the other profile)', () => {
                   const ed = addSplit(sync, plan, arcs, menu.side, menu.s);
                   if (ed) props.onSyncChange(ed);
                 })}
-              {sync &&
+              {edit.sync &&
+                sync &&
                 arcs &&
                 menuItem('Add pin here (+ matching one on the other profile)', () => {
                   const next = addPin(sync, arcs, menu.side, menu.s);

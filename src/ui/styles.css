@@ -9,7 +9,6 @@
   --tip: #ea7a12;
   --left: #16a34a;
   --right: #9333ea;
-  --wire: rgba(100, 109, 120, 0.35);
   --warn-bg: #fff7e6;
   --warn: #9a5b00;
   --err-bg: #fdecec;
@@ -30,7 +29,6 @@
     --tip: #f59e42;
     --left: #4ade80;
     --right: #c084fc;
-    --wire: rgba(152, 162, 173, 0.3);
     --warn-bg: #2d2412;
     --warn: #f3c46b;
     --err-bg: #2f1717;
@@ -237,3 +235,9 @@ button.wide { width: 100%; margin-top: 4px; }
   .step-label { display: none; }
   .step-tab.current .step-label { display: inline; }
 }
+
+/* ---- Export callout ---- */
+.callout { display: grid; gap: 2px; margin: 4px 0 14px; padding: 10px 12px; border-radius: 8px; border: 2px solid var(--accent); background: var(--sel); font-size: 15px; }
+.callout strong { font-size: 20px; color: var(--accent); }
+.callout small { color: var(--muted); font-size: 11px; }
+.callout.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); font-size: 13px; }

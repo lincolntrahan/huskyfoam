@@ -41,6 +41,8 @@ export interface PageCtx {
   applyLeTe: () => void;
   baseName: string;
   setNotice: (s: string | null) => void;
+  /** Clear profiles and all job settings (asks first). */
+  resetProject: () => void;
 }
 
 function FileRow(props: { label: string; color: string; file: SourceFile | null; loaded: LoadedProfile | null; onLoad: (f: SourceFile) => void }) {
@@ -99,6 +101,16 @@ function presetOptions(list: { id: string; name: string }[], origin: (id: string
   });
 }
 
+/** One line describing what the selected material sets (cut speed, kerf, power). */
+function materialSummary(job: JobSettings, u: string): string {
+  const kerf =
+    job.kerf.mode === 'auto' && job.kerfTable.length
+      ? `kerf from a ${job.kerfTable.length}-row speed table`
+      : `kerf ${job.kerf.root} root / ${job.kerf.tip} tip`;
+  const power = job.wireWatts != null ? `${job.wireWatts} W` : 'no wire power set';
+  return `Cuts at ${job.cutSpeed} ${u}/min · ${kerf} ${u} · ${power}. Change these in the material (Edit…).`;
+}
+
 // ---------------------------------------------------------------- 1. Import
 export function ImportPage(c: PageCtx) {
   return (
@@ -108,7 +120,12 @@ export function ImportPage(c: PageCtx) {
         <small className="hint">Load the root and tip outlines as DXF (e.g. exported from SolidWorks). Both need to be closed outlines.</small>
         <FileRow label="Root" color="var(--root)" file={c.rootFile} loaded={c.root} onLoad={c.loadRoot} />
         <FileRow label="Tip" color="var(--tip)" file={c.tipFile} loaded={c.tip} onLoad={c.loadTip} />
-        <button onClick={c.loadExample}>Load V-tail example</button>
+        <div className="row-buttons">
+          <button onClick={c.loadExample}>Load V-tail example</button>
+          <button className="danger" disabled={!c.rootFile && !c.tipFile} onClick={c.resetProject} title="Clear both profiles and every job setting (presets are kept)">
+            Reset project
+          </button>
+        </div>
       </section>
     </>
   );
@@ -144,44 +161,9 @@ export function SetupPage(c: PageCtx) {
             </button>
           </span>
         </label>
+        <small className="hint">{materialSummary(job, u)}</small>
       </section>
 
-      <section>
-        <h2>Kerf, speed &amp; power</h2>
-        <SelectField
-          label="Kerf"
-          value={job.kerf.mode}
-          options={[
-            { value: 'fixed', label: 'Fixed root / tip' },
-            { value: 'auto', label: job.kerfTable.length ? 'Auto from speed' : 'Auto (no kerf table yet)' },
-          ]}
-          onChange={(v) => patch({ kerf: { ...job.kerf, mode: v } })}
-        />
-        {job.kerf.mode === 'auto' && (
-          <small className="hint">
-            {job.kerfTable.length
-              ? `Kerf comes from the material's ${job.kerfTable.length}-row speed table, per point.`
-              : 'The material has no kerf table. Fill it with the kerf test (Material → Edit…). Until then the fixed values below are used.'}
-          </small>
-        )}
-        <NumberField label={`Root kerf (${u})`} value={job.kerf.root} min={0} step={0.001} onChange={(v) => patch({ kerf: { ...job.kerf, root: v } })} hint="Full kerf width at the root face; the path is offset by half" />
-        <NumberField label={`Tip kerf (${u})`} value={job.kerf.tip} min={0} step={0.001} onChange={(v) => patch({ kerf: { ...job.kerf, tip: v } })} />
-        <NumberField label={`Cut speed (${u}/min)`} value={job.cutSpeed} min={0} onChange={(v) => patch({ cutSpeed: v })} hint="Wire speed at the faster foam face" />
-        <label className="field" title="Set your hot-wire supply to this. Goes into the G-code as a comment and the {wireWatts} header token.">
-          <span>Wire power (W)</span>
-          <input
-            type="number"
-            step="any"
-            min={0}
-            placeholder="not set"
-            value={job.wireWatts ?? ''}
-            onChange={(e) => {
-              const v = parseFloat(e.target.value);
-              patch({ wireWatts: Number.isFinite(v) ? v : null });
-            }}
-          />
-        </label>
-      </section>
 
       <section>
         <h2>Block on the machine ({u})</h2>
@@ -214,7 +196,42 @@ export function SetupPage(c: PageCtx) {
 
 // ---------------------------------------------------------------- 3. Transform
 export function TransformPage(c: PageCtx) {
-  return <TransformPanel value={c.job.transforms} units={c.machine.units} onChange={(t, opts) => c.patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })} />;
+  const { job, patch } = c;
+  const u = c.machine.units;
+  const distance = job.profile.distance ?? job.span;
+  const inset = job.profile.inset ?? (job.span - distance) / 2;
+  return (
+    <>
+      <section>
+        <h2>Profile placement ({u})</h2>
+        <small className="hint">
+          Where the root and tip profiles sit along the wire, inside the {job.span} {u} block. By default the profiles are the block's faces.
+        </small>
+        <NumberField
+          label="Profile distance"
+          value={distance}
+          min={0}
+          onChange={(v) => patch({ profile: { ...job.profile, distance: v } })}
+          hint="Distance between the root and tip profiles (the panel span)"
+        />
+        <NumberField
+          label="Root profile inset"
+          value={inset}
+          onChange={(v) => patch({ profile: { ...job.profile, inset: v } })}
+          hint="From the block's root face to the root profile"
+        />
+        <div className="row-buttons">
+          <button disabled={job.profile.inset === null} onClick={() => patch({ profile: { ...job.profile, inset: null } })} title="Same gap on both sides">
+            Center in block
+          </button>
+          <button disabled={job.profile.distance === null && job.profile.inset === null} onClick={() => patch({ profile: { distance: null, inset: null } })}>
+            Profiles on block faces
+          </button>
+        </div>
+      </section>
+      <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })} />
+    </>
+  );
 }
 
 // ---------------------------------------------------------------- 4. Segment
@@ -344,6 +361,16 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
   const SHOW = 300;
   return (
     <>
+      {job.wireWatts != null ? (
+        <div className="callout">
+          Before cutting, set the hot-wire power to <strong>{job.wireWatts} W</strong>
+          <small>from material “{c.material.name}”</small>
+        </div>
+      ) : (
+        <div className="callout warn">
+          No wire power is set for “{c.material.name}”. Add it in Define Setup → Material → Edit…, or set the power by hand before cutting.
+        </div>
+      )}
       <section>
         <h2>Corner dwell</h2>
         <label className="check">
@@ -374,15 +401,6 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
             <li>
               Cut time <b>{r.stats.cutMinutes.toFixed(1)} min</b>
               {r.stats.dwells ? ` (incl. ${r.stats.dwells} dwells)` : ''}
-            </li>
-            <li>
-              {job.wireWatts != null ? (
-                <>
-                  Set wire power to <b>{job.wireWatts} W</b>
-                </>
-              ) : (
-                'No wire power set (Define Setup)'
-              )}
             </li>
             <li>
               {machine.feedMode} feed, axes {machine.axisOrder.map((k) => machine.axes[k]).join(' ')}, {machine.units === 'in' ? 'inches' : 'mm'}

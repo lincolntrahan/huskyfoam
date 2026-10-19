@@ -166,3 +166,30 @@ describe('flips', () => {
     expect(signedArea(res.profilePts.root)).toBeGreaterThan(0);
   });
 });
+
+describe('profile placement inside the block', () => {
+  const base = (patch: Partial<JobSettings>) => generateCut(root, tip, { ...job(() => {}), ...patch }, machine);
+  it('a 12" panel centered in a 14" block cuts like a 12" block at the same spot', () => {
+    const panel = base({ span: 12, rootFaceFromLeft: 12, profile: { distance: null, inset: null } });
+    const centered = base({ span: 14, rootFaceFromLeft: 11, profile: { distance: 12, inset: null } });
+    const explicit = base({ span: 14, rootFaceFromLeft: 11, profile: { distance: 12, inset: 1 } });
+    expect(centered.gcode).toBe(panel.gcode);
+    expect(explicit.gcode).toBe(panel.gcode);
+    expect(centered.warnings).toEqual([]);
+  });
+
+  it('works with the root on the right', () => {
+    const panel = base({ span: 12, rootFaceFromLeft: 12, rootSide: 'right' });
+    const inBlock = base({ span: 14, rootFaceFromLeft: 11, rootSide: 'right', profile: { distance: 12, inset: 1 } });
+    const a = inBlock.moves.map((m) => m.left.x);
+    const b = panel.moves.map((m) => m.left.x);
+    a.forEach((x, i) => expect(x).toBeCloseTo(b[i], 9));
+  });
+
+  it('warns when the profiles stick out of the block, and rejects a zero distance', () => {
+    expect(base({ span: 10, profile: { distance: 12, inset: 0 } }).warnings.map((w) => w.message)[0]).toMatch(/outside the foam block/);
+    const zero = base({ profile: { distance: 0, inset: null } });
+    expect(zero.errors[0]).toMatch(/Profile distance/);
+    expect(zero.errorStages).toEqual(['transform']);
+  });
+});

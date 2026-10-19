@@ -59,6 +59,8 @@ export interface MaterialPreset {
   cutSpeed: number;
   kerfRoot: number;
   kerfTip: number;
+  /** Fixed root/tip kerf, or per-point kerf from the table below. */
+  kerfMode?: 'fixed' | 'auto';
   /** Optional kerf-vs-speed table for "auto from speed" kerf (fill it with the kerf test). */
   kerfTable?: KerfPoint[];
   /** Default corner dwell for this material (contact cutting needs it; radiant usually not). */
@@ -89,6 +91,11 @@ export interface JobSettings {
   rootFaceFromLeft: number;
   /** Block span (root face to tip face). */
   span: number;
+  /**
+   * Profile planes inside the block: distance between the root and tip profiles (null = the
+   * block span) and the root profile's inset from the block's root face (null = centered).
+   */
+  profile: { distance: number | null; inset: number | null };
   rootSide: 'left' | 'right';
   /** Translation applied to both profiles (positions the part in machine XY). */
   offset: Vec2;
