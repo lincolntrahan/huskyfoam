@@ -30,6 +30,20 @@ When splits change, a custom cut plan is carried over where possible. If it can'
 
 The **Root / Tip / Both** switch on the canvas shows one face at a time (profile, kerf, plan, markers and that side's carriage path).
 
+### Transforms
+
+The **Transforms** section adjusts each profile without going back to CAD:
+
+- **Twist (°)**: separate for root and tip; positive = leading edge up.
+  - It is **added on top of** any twist already drawn in your DXFs. If the CAD profiles already include washout, leave it at 0.
+  - It rotates about a pivot: 25% chord by default, or the LE, the TE, or a typed point.
+  - The LE/TE are found automatically, ignoring straight tabs. To use your own, click a split marker → *Use as LE / TE*.
+- **Scale** and **Move**: per profile. *Link root & tip* (on by default) applies them to both.
+- **Flip horizontal / vertical**: applies to both profiles (cut TE-first or upside down; both together = rotate 180°). Flipping resets the cut plan, since segment numbering changes.
+- **Mirror L/R** (next to *Root on*): cuts the opposite-hand panel by putting the root on the other carriage.
+
+The canvas shows each profile's chord line with LE/TE labels and a cross at the pivot.
+
 ### Cut plan: run-outs, jogs and run-ins
 
 By default the wire goes once around the whole profile (the **Loop** plan). You can change that:
