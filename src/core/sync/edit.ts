@@ -1,6 +1,6 @@
 import { withinS, wrapS, type ArcLoop } from '../geom/arc';
 import type { CutPlan } from '../plan/model';
-import { remapInsert, remapRemove, remapRotate } from '../plan/remap';
+import { remapInsert, remapRemove, remapRotate, type SegmentChange } from '../plan/remap';
 import { loopPlan } from '../plan/templates';
 import { atFraction, locate, type SyncSettings } from './sync';
 
@@ -16,6 +16,8 @@ export interface SyncEdit {
   sync: SyncSettings;
   plan: CutPlan | null;
   note?: string;
+  /** Segment renumbering, if any (apply it to per-segment overrides). */
+  change?: SegmentChange;
 }
 
 const other = (s: Side): Side => (s === 'root' ? 'tip' : 'root');
@@ -28,7 +30,7 @@ export function addSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, s
   const next = { ...sync, root: sync.root.slice(), tip: sync.tip.slice() };
   next[side].splice(at.k + 1, 0, wrapS(arcs[side], s));
   next[other(side)].splice(at.k + 1, 0, partner);
-  return { sync: next, plan: plan && remapInsert(plan, at.k) };
+  return { sync: next, plan: plan && remapInsert(plan, at.k), change: { kind: 'insert', k: at.k } };
 }
 
 /** Slide split i along its own profile; it can't pass its neighbours. */
@@ -49,10 +51,12 @@ export function removeSplit(sync: SyncSettings, plan: CutPlan | null, i: number)
   const n = sync.root.length;
   if (n < 2) return null;
   const next = { ...sync, root: sync.root.filter((_, j) => j !== i), tip: sync.tip.filter((_, j) => j !== i) };
-  if (!plan) return { sync: next, plan };
+  const change: SegmentChange = { kind: 'remove', i, n };
+  if (!plan) return { sync: next, plan, change };
   const remapped = remapRemove(plan, i, n);
-  if (remapped) return { sync: next, plan: remapped };
+  if (remapped) return { sync: next, plan: remapped, change };
   return {
+    change,
     sync: next,
     plan: loopPlan(n - 1),
     note: `Removing split ${i + 1} broke the custom cut plan (it used that split or one of its segments on its own), so the plan was reset to Loop.`,
@@ -62,7 +66,8 @@ export function removeSplit(sync: SyncSettings, plan: CutPlan | null, i: number)
 /** Make split i the loop start (segment 1). */
 export function setLoopStart(sync: SyncSettings, plan: CutPlan | null, i: number): SyncEdit {
   const rot = (l: number[]) => [...l.slice(i), ...l.slice(0, i)];
-  return { sync: { ...sync, root: rot(sync.root), tip: rot(sync.tip) }, plan: plan && remapRotate(plan, i, sync.root.length) };
+  const n = sync.root.length;
+  return { sync: { ...sync, root: rot(sync.root), tip: rot(sync.tip) }, plan: plan && remapRotate(plan, i, n), change: { kind: 'rotate', i, n } };
 }
 
 /** Add a pin at s on one side, paired at the same fraction of the segment on the other side. */

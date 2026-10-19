@@ -24,7 +24,7 @@ function job(t: (x: Transforms) => void, patch: Partial<JobSettings> = {}): JobS
   const j = defaultJob(machine, material);
   j.span = 12.07;
   j.rootFaceFromLeft = (machine.carriageSpacing - j.span) / 2;
-  j.kerf = { root: 0.0998, tip: 0.1116 };
+  j.kerf = { mode: 'fixed', root: 0.0998, tip: 0.1116 };
   j.offset = OFFSET;
   j.transforms = defaultTransforms();
   t(j.transforms);

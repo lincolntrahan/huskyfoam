@@ -175,3 +175,28 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .xf-pair button { padding: 1px 5px; font-size: 11px; }
 .check { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 .warn-hint { color: var(--warn); }
+
+/* ---- Presets & projects ---- */
+.topbar label button { padding: 2px 8px; }
+.badge { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: var(--sel); color: var(--accent); font-size: 11px; }
+.step-override { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 6px 6px 31px; font-size: 12px; }
+.step-override label { display: flex; gap: 4px; align-items: center; }
+.step-override input { width: 64px; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: grid; place-items: center; z-index: 20; padding: 16px; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; width: min(560px, 100%); max-height: calc(100vh - 32px); display: grid; grid-template-rows: auto auto 1fr auto auto; overflow: hidden; }
+.modal header, .modal footer { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.modal header { border-bottom: 1px solid var(--border); }
+.modal header h2 { margin: 0; font-size: 15px; flex: 1; }
+.modal > .hint { padding: 0 14px; }
+.modal footer { border-top: 1px solid var(--border); flex-wrap: wrap; }
+.modal footer .spacer { flex: 1; }
+.modal-body { overflow-y: auto; padding: 4px 14px 10px; }
+.modal-body h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 14px 0 6px; }
+.modal .msg { margin: 4px 14px; }
+.field-block { display: grid; gap: 4px; margin: 6px 0; }
+button.danger { color: var(--err); border-color: var(--err); }
+.kt-row { display: grid; grid-template-columns: 1fr 1fr 70px; gap: 6px; align-items: center; margin-bottom: 4px; }
+.kt-row input { width: 100%; min-width: 0; }
+.kt-head span { font-size: 11px; color: var(--muted); }
+.kerf-test { display: grid; gap: 4px; padding: 6px 0; }
+details summary { cursor: pointer; margin: 8px 0; color: var(--accent); }

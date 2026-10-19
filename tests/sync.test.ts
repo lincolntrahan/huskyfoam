@@ -23,7 +23,7 @@ function vtailJob(): JobSettings {
   const job = defaultJob(machine, material);
   job.span = 12.07;
   job.rootFaceFromLeft = (machine.carriageSpacing - job.span) / 2;
-  job.kerf = { root: 0.0998, tip: 0.1116 };
+  job.kerf = { mode: 'fixed', root: 0.0998, tip: 0.1116 };
   job.offset = { x: 4.7221, y: 0.7001 };
   job.sampling.mode = 'uniform';
   return job;
@@ -122,7 +122,7 @@ describe('pins', () => {
     const sRoot = auto.root[k] + 0.3 * spanS(arcs.root, auto.root[k], auto.root[k + 1]);
     const withPin = addPin(auto, arcs, 'root', sRoot)!;
     withPin.pins[0].tip = auto.tip[k] + 0.6 * spanS(arcs.tip, auto.tip[k], auto.tip[k + 1]); // drag the tip end
-    const res = run({ sync: withPin, plan: null, kerf: { root: 0, tip: 0 } });
+    const res = run({ sync: withPin, plan: null, kerf: { mode: 'fixed', root: 0, tip: 0 } });
     expect(res.errors).toEqual([]);
     const off = vtailJob().offset;
     const shift = (p: { x: number; y: number }) => ({ x: p.x + off.x, y: p.y + off.y });

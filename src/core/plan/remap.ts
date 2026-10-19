@@ -82,3 +82,30 @@ export function remapRotate(plan: CutPlan, i: number, n: number): CutPlan {
   const steps = plan.steps.map((s): PlanStep => (s.kind === 'segment' ? { ...s, seg: rot(s.seg) } : s));
   return renameSplits({ ...plan, steps }, rot)!;
 }
+
+/** How a split edit renumbered the segments (so per-segment settings can follow). */
+export type SegmentChange =
+  | { kind: 'insert'; k: number }
+  | { kind: 'remove'; i: number; n: number }
+  | { kind: 'rotate'; i: number; n: number };
+
+/**
+ * Carry per-segment settings (e.g. kerf/speed overrides) across a split edit. An inserted split
+ * gives both halves the old segment's settings; a removed one keeps the earlier segment's.
+ */
+export function remapSegmentMap<T>(map: Record<number, T>, change: SegmentChange): Record<number, T> {
+  const out: Record<number, T> = {};
+  for (const [key, v] of Object.entries(map)) {
+    const j = Number(key);
+    if (change.kind === 'insert') {
+      if (j < change.k) out[j] = v;
+      else if (j > change.k) out[j + 1] = v;
+      else out[j] = out[j + 1] = v;
+    } else if (change.kind === 'remove') {
+      if (j === change.i) continue; // merged into the previous segment
+      const nj = j > change.i ? j - 1 : j;
+      out[nj] = v;
+    } else out[(j - change.i + change.n) % change.n] = v;
+  }
+  return out;
+}

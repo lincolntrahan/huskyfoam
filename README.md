@@ -63,9 +63,26 @@ Jogs are sent as coordinated `G1` moves at the machine's jog speed. You get a wa
 
 Each profile is split into segments at every DXF entity boundary and at sharp corners. Segment *N* on the root is cut together with segment *N* on the tip. Both profiles therefore need the same number of segments. The easiest way to get that is to draw root and tip with the same entities (e.g. 2 splines + tab lines), as in the example.
 
+### Kerf, speed, dwell and wire power
+
+- **Kerf**: fixed root/tip values, or *Auto from speed*. Auto uses the material's kerf-vs-speed table, so the slower tip automatically gets a wider kerf.
+- **Kerf test** (Material → Edit… → *Kerf test*): downloads G-code that cuts one 1″ square plug at 40/60/80/100% of the cut speed. Measure the plugs, type the sizes in, and *Use these as the kerf table*.
+- **Per-segment kerf / speed**: select a segment in the cut-plan list (or click it on the canvas) and fill in the two fields. Blank = the job value.
+- **Corner dwell**: pauses (`G4 P…`) at corners sharper than the set angle. Defaults come from the material. Whether `P` is seconds or milliseconds is a machine setting.
+- **Wire power (W)**: set per material. It's written at the top of the G-code as a comment and is available to the machine header as `{wireWatts}` (e.g. `M3 S{wireWatts}`).
+
+## Projects
+
+*Save project* writes a `.hfoam.json` with both DXFs, every setting, the cut plan, and snapshots of the machine and material. *Open project…* brings it all back exactly, even if the presets have changed since.
+
+The current job also autosaves in your browser, so a reload picks up where you left off (*Start fresh* clears it).
+
 ## Presets
 
-Machine and material presets are JSON files in [`presets/`](presets). To change one for the whole team, edit or add a file and open a PR. In-app editors are planned for M2.
+Pick a **machine** and **material** at the top, then use *Edit…* to change them:
+
+- **Team presets** are JSON files in [`presets/`](presets), bundled with the app. Editing one saves a copy in your browser.
+- **Browser presets** live only in that browser. *Export for repo* downloads the JSON. Add it to `presets/machines/` or `presets/materials/` and open a PR so the whole team gets it.
 
 > The `shop-4axis` geometry (36″ carriage spacing, travel limits, 30 in/min cap) is a **placeholder**. The example's settings were back-solved from a DevFoam export. Measure the real machine before relying on it.
 
