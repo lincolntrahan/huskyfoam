@@ -1,6 +1,9 @@
 import { transformProfile, type Profile } from '../geom/profile';
 import { dist, lerp, type Vec2 } from '../geom/vec';
 import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
+import type { CutPlan } from '../plan/model';
+import { loopPlan, type Rect } from '../plan/templates';
+import { splitOffsetLoop, walkPlan, type Gap, type PathPt } from '../plan/walk';
 import { resamplePair } from '../sync/resample';
 import { autoSplits, defaultStart, segmentsFrom } from '../sync/segments';
 import type { JobSettings, MachinePreset } from '../types';
@@ -10,6 +13,8 @@ export interface CutWarning {
   message: string;
   /** Index into `moves` where the problem first appears, when it has a location. */
   moveIndex?: number;
+  /** Plan step the problem belongs to, when it has one. */
+  step?: number;
 }
 
 export interface CutResult {
@@ -23,7 +28,12 @@ export interface CutResult {
   stations: Station[];
   /** Kerf-offset face stations (closed). */
   kerfStations: Station[];
-  /** Carriage start (home) and every move after it, including lead-in/out. */
+  /** The plan that was walked (job.plan, or the default loop). */
+  plan: CutPlan | null;
+  /** Face path walked from the plan, starting at home. */
+  path: PathPt[];
+  gaps: Gap[];
+  /** Carriage start (home) and every move after it. */
   start: CarriagePos;
   moves: Move[];
   gcode: string;
@@ -49,6 +59,9 @@ function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
     tipSplits: [],
     stations: [],
     kerfStations: [],
+    plan: null,
+    path: [],
+    gaps: [],
     start: { left: z, right: z },
     moves: [],
     gcode: '',
@@ -60,6 +73,32 @@ function ordered(splits: number[], start: number): number[] {
   const k = splits.indexOf(start);
   return [...splits.slice(k), ...splits.slice(0, k)];
 }
+
+const hasBlock = (b: Rect) => b.w > 0 && b.h > 0;
+
+/** True when segment ab runs through the inside of the rectangle (touching the edge doesn't count). */
+export function crossesRect(a: Vec2, b: Vec2, r: Rect): boolean {
+  const eps = 1e-6;
+  const x0 = r.x + eps;
+  const x1 = r.x + r.w - eps;
+  const y0 = r.y + eps;
+  const y1 = r.y + r.h - eps;
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const clip = (p: number, q: number) => {
+    if (p === 0) return q >= 0;
+    const t = q / p;
+    if (p < 0) t0 = Math.max(t0, t);
+    else t1 = Math.min(t1, t);
+    return t0 <= t1;
+  };
+  if (!(clip(-dx, a.x - x0) && clip(dx, x1 - a.x) && clip(-dy, a.y - y0) && clip(dy, y1 - a.y))) return false;
+  return (t1 - t0) * Math.hypot(dx, dy) > eps;
+}
+
+const inside = (p: Vec2, r: Rect) => p.x > r.x + 1e-6 && p.x < r.x + r.w - 1e-6 && p.y > r.y + 1e-6 && p.y < r.y + r.h - 1e-6;
 
 export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, machine: MachinePreset): CutResult {
   const shift = (p: Vec2) => ({ x: p.x + job.offset.x, y: p.y + job.offset.y });
@@ -88,6 +127,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
   }
   const rSegs = segmentsFrom(root, rs, r0);
   const tSegs = segmentsFrom(tip, ts, t0);
+  const n = rSegs.length;
 
   // 2. Resample each matched pair to equal counts
   const stations: Station[] = [];
@@ -96,38 +136,59 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     for (let i = 0; i < a.length - 1; i++) stations.push({ r: a[i], t: b[i], seg: k, boundary: i === 0 });
   });
 
-  // 3. Kerf
+  // 3. Kerf, on the full closed loop
   const kerfFor = (side: 'root' | 'tip') => (seg: number) => job.segmentKerf[seg] ?? job.kerf[side];
   const kerfStations = offsetStations(stations, kerfFor('root'), kerfFor('tip'));
   const closeLoop = (s: Station[]) => [...s, { ...s[0], boundary: false }];
 
-  // 4. Full face path: home -> lead-in -> loop -> lead-out -> home
+  // 4. Walk the cut plan
+  const plan = job.plan ?? loopPlan(n);
   const home = machine.home;
-  const straight = (p: Vec2) => ({ r: p, t: p, lead: true });
-  const loop = closeLoop(kerfStations).map((s) => ({ r: s.r, t: s.t, lead: false }));
-  const path = [
-    ...job.leadIn.map(straight),
-    ...loop,
-    ...job.leadIn.slice().reverse().map(straight),
-    straight(home),
-  ];
+  let walk;
+  try {
+    walk = walkPlan(plan, splitOffsetLoop(kerfStations, n), home);
+  } catch (e) {
+    const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`]);
+    Object.assign(res, { rootSplits, tipSplits, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
+    return res;
+  }
+  for (const g of walk.gaps) {
+    errors.push(
+      g.before >= plan.steps.length
+        ? 'The plan does not end at home. Add a line back to home (or use "Bridge").'
+        : `Gap before step ${g.before + 1}: it doesn't start where step ${g.before} ends. Bridge it with a jog or cut, or reorder the steps.`,
+    );
+  }
+  walk.segUse.forEach((count, k) => {
+    if (count === 0) warnings.push({ message: `Segment ${k + 1} is never cut.` });
+    if (count > 1) warnings.push({ message: `Segment ${k + 1} is cut ${count} times.` });
+  });
 
   // 5. Project and time each move
   const project = projector(job, machine);
   const start = project(home, home);
   const moves: Move[] = [];
-  let prevFace = { r: home, t: home };
+  let prevFace: PathPt = walk.path[0];
   let prevCar = start;
   let cutMinutes = 0;
   let maxCarriageSpeed = 0;
   let capped = 0;
   let firstCapped = -1;
-  for (const p of path) {
+  const jogHits = new Set<number>();
+  for (const p of walk.path.slice(1)) {
+    if (p.speed === 'gap') {
+      prevFace = p;
+      prevCar = project(p.r, p.t);
+      continue;
+    }
     const dFace = Math.max(dist(p.r, prevFace.r), dist(p.t, prevFace.t));
     const car = project(p.r, p.t);
     const dCar = Math.max(dist(car.left, prevCar.left), dist(car.right, prevCar.right));
     if (dFace < 1e-9 && dCar < 1e-9) continue;
-    let minutes = dFace / job.cutSpeed;
+    if (p.speed === 'jog' && hasBlock(job.block) && (crossesRect(prevFace.r, p.r, job.block) || crossesRect(prevFace.t, p.t, job.block))) {
+      jogHits.add(p.step);
+    }
+    let minutes = p.speed === 'jog' ? dCar / machine.jogSpeed : dFace / job.cutSpeed;
     const speed = minutes > 0 ? dCar / minutes : Infinity;
     maxCarriageSpeed = Math.max(maxCarriageSpeed, speed);
     if (speed > machine.maxSpeed) {
@@ -135,9 +196,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
       if (firstCapped < 0) firstCapped = moves.length;
       minutes = dCar / machine.maxSpeed;
     }
-    // A carriage still has to move even if both faces barely do (e.g. long lead-ins).
-    if (minutes <= 0) minutes = dCar / machine.maxSpeed;
-    moves.push({ left: car.left, right: car.right, minutes, lead: p.lead });
+    moves.push({ left: car.left, right: car.right, minutes, lead: p.line, speed: p.speed, step: p.step });
     cutMinutes += minutes;
     prevFace = p;
     prevCar = car;
@@ -148,29 +207,50 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
       moveIndex: firstCapped,
     });
   }
+  for (const s of jogHits) {
+    warnings.push({ message: `Step ${s + 1} is a jog through the foam block; it would cut at jog speed. Make it a cut or route it around the block.`, step: s });
+  }
 
-  // 6. Travel limits
+  // 6. Cut lines that stop inside the block
+  if (hasBlock(job.block)) {
+    plan.steps.forEach((s, i) => {
+      if (s.kind !== 'line' || s.speed !== 'cut') return;
+      for (const id of [s.from, s.to]) {
+        const pt = plan.points[id];
+        const pts = pt?.kind === 'free' ? [pt.p] : pt?.kind === 'freePair' ? [pt.r, pt.t] : [];
+        if (pts.some((q) => inside(q, job.block))) {
+          warnings.push({ message: `Step ${i + 1} ends inside the foam block; the wire would stop in the foam.`, step: i });
+          break;
+        }
+      }
+    });
+  }
+
+  // 7. Travel limits
   const [x0, x1] = machine.travel.x;
   const [y0, y1] = machine.travel.y;
   const outside = (p: Vec2) => p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1;
   const firstOut = moves.findIndex((m) => outside(m.left) || outside(m.right));
   if (firstOut >= 0) {
-    const n = moves.filter((m) => outside(m.left) || outside(m.right)).length;
-    warnings.push({ message: `${n} move${n === 1 ? ' goes' : 's go'} outside the machine travel limits.`, moveIndex: firstOut });
+    const count = moves.filter((m) => outside(m.left) || outside(m.right)).length;
+    warnings.push({ message: `${count} move${count === 1 ? ' goes' : 's go'} outside the machine travel limits.`, moveIndex: firstOut });
   }
 
-  const gcode = writeGcode(start, moves, machine, job.cutSpeed);
+  const ok = errors.length === 0;
   return {
-    ok: errors.length === 0,
+    ok,
     errors,
     warnings,
     rootSplits,
     tipSplits,
     stations: closeLoop(stations),
     kerfStations: closeLoop(kerfStations),
+    plan,
+    path: walk.path,
+    gaps: walk.gaps,
     start,
     moves,
-    gcode,
-    stats: { cutMinutes, maxCarriageSpeed, segments: rSegs.length, moves: moves.length },
+    gcode: ok ? writeGcode(start, moves, machine, job.cutSpeed) : '',
+    stats: { cutMinutes, maxCarriageSpeed, segments: n, moves: moves.length },
   };
 }

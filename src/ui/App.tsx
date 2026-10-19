@@ -1,25 +1,20 @@
 import { useMemo, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
-import type { Vec2 } from '../core/geom/vec';
+import type { Profile } from '../core/geom/profile';
 import { loadDxfProfile } from '../core/io/loadProfile';
+import type { CutPlan } from '../core/plan/model';
+import { leTePlan, loopPlan, type Rect } from '../core/plan/templates';
 import { defaultJob, machines, materials } from '../core/presets';
 import type { JobSettings } from '../core/types';
 import exampleRoot from '../../tests/fixtures/vtail-root.dxf?raw';
 import exampleTip from '../../tests/fixtures/vtail-tip.dxf?raw';
 import { NumberField, SelectField } from './Fields';
+import { PlanPanel } from './PlanPanel';
 import { Preview2D, type Layers } from './Preview2D';
 
 interface SourceFile {
   name: string;
   text: string;
-}
-
-function parseWaypoints(text: string): Vec2[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.split(/[,\s]+/).filter(Boolean).map(Number))
-    .filter((n) => n.length === 2 && n.every(Number.isFinite))
-    .map(([x, y]) => ({ x, y }));
 }
 
 function download(name: string, text: string) {
@@ -29,6 +24,17 @@ function download(name: string, text: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Bounding box of both positioned profiles, grown by `margin`. */
+function fitBlock(profiles: Profile[], offset: { x: number; y: number }, margin: number): Rect {
+  const pts = profiles.flatMap((p) => p.pts).map((p) => ({ x: p.x + offset.x, y: p.y + offset.y }));
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const r = (v: number) => Math.round(v * 1000) / 1000;
+  const x = r(Math.min(...xs) - margin);
+  const y = r(Math.min(...ys) - margin);
+  return { x, y, w: r(Math.max(...xs) + margin - x), h: r(Math.max(...ys) + margin - y) };
 }
 
 function FileRow(props: { label: string; color: string; file: SourceFile | null; onLoad: (f: SourceFile) => void }) {
@@ -50,7 +56,7 @@ function FileRow(props: { label: string; color: string; file: SourceFile | null;
           }}
         />
         <span className="name" style={{ flex: 1 }}>{props.file?.name ?? 'No file'}</span>
-        <span role="button" tabIndex={0} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>
+        <span role="button" tabIndex={0} className="file-btn">
           Open…
         </span>
       </label>
@@ -65,10 +71,12 @@ export function App() {
   const material = materials.find((m) => m.id === materialId)!;
 
   const [job, setJob] = useState<JobSettings>(() => defaultJob(machine, material));
-  const [leadText, setLeadText] = useState('');
   const [rootFile, setRootFile] = useState<SourceFile | null>(null);
   const [tipFile, setTipFile] = useState<SourceFile | null>(null);
-  const [layers, setLayers] = useState<Layers>({ profiles: true, kerf: true, wires: true, carriages: false });
+  const [layers, setLayers] = useState<Layers>({ profiles: true, kerf: true, plan: true, wires: true, carriages: false });
+  const [clearance, setClearance] = useState(0.5);
+  const [outBack, setOutBack] = useState(1);
+  const [selectedStep, setSelectedStep] = useState<number | null>(null);
 
   const patch = (p: Partial<JobSettings>) => setJob((j) => ({ ...j, ...p }));
 
@@ -78,6 +86,8 @@ export function App() {
     () => (root?.profile && tip?.profile ? generateCut(root.profile, tip.profile, job, machine) : null),
     [root, tip, job, machine],
   );
+  const plan: CutPlan | null = result?.plan ?? null;
+  const setPlan = (p: CutPlan) => patch({ plan: p });
 
   const importWarnings = [
     ...(root?.warnings.map((w) => `Root: ${w}`) ?? []),
@@ -86,11 +96,34 @@ export function App() {
     ...(tip && !tip.profile ? ['Tip: could not build a closed outline.'] : []),
   ];
 
+  const profiles = [root?.profile, tip?.profile].filter((p): p is Profile => !!p);
+  const blockOrFit = (): Rect => (job.block.w > 0 && job.block.h > 0 ? job.block : fitBlock(profiles, job.offset, 0.1));
+
   const loadExample = () => {
+    const rootLoaded = loadDxfProfile(exampleRoot, machine.units).profile!;
+    const tipLoaded = loadDxfProfile(exampleTip, machine.units).profile!;
+    const offset = { x: 4.7221, y: 0.7001 };
     setRootFile({ name: 'Vtail bottom.DXF (example)', text: exampleRoot });
     setTipFile({ name: 'Vtail top.DXF (example)', text: exampleTip });
+    setSelectedStep(null);
     // Back-solved from the DevFoam export of this part.
-    patch({ span: 12.07, rootFaceFromLeft: (machine.carriageSpacing - 12.07) / 2, rootSide: 'left', kerf: { root: 0.0998, tip: 0.1116 }, offset: { x: 4.7221, y: 0.7001 } });
+    patch({
+      span: 12.07,
+      rootFaceFromLeft: (machine.carriageSpacing - 12.07) / 2,
+      rootSide: 'left',
+      kerf: { root: 0.0998, tip: 0.1116 },
+      offset,
+      block: fitBlock([rootLoaded, tipLoaded], offset, 0.1),
+      plan: null,
+    });
+  };
+
+  const applyLeTe = () => {
+    if (!result || !root?.profile) return;
+    const block = blockOrFit();
+    const splits = result.rootSplits.map((i) => ({ x: root.profile!.pts[i].x + job.offset.x, y: root.profile!.pts[i].y + job.offset.y }));
+    setSelectedStep(null);
+    patch({ block, plan: leTePlan({ splits, block, clearance }) });
   };
 
   const u = machine.units;
@@ -102,12 +135,7 @@ export function App() {
         <h1>HuskyFoam</h1>
         <label>
           Machine
-          <select
-            value={machineId}
-            onChange={(e) => {
-              setMachineId(e.target.value);
-            }}
-          >
+          <select value={machineId} onChange={(e) => setMachineId(e.target.value)}>
             {machines.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
@@ -129,11 +157,7 @@ export function App() {
           </select>
         </label>
         <div className="spacer" />
-        <button
-          className="primary"
-          disabled={!result?.ok}
-          onClick={() => result && download(`${baseName}.nc`, result.gcode)}
-        >
+        <button className="primary" disabled={!result?.ok} onClick={() => result && download(`${baseName}.nc`, result.gcode)}>
           Export G-code
         </button>
       </header>
@@ -142,8 +166,8 @@ export function App() {
         <aside className="sidebar">
           <section>
             <h2>Profiles</h2>
-            <FileRow label="Root" color="var(--root)" file={rootFile} onLoad={setRootFile} />
-            <FileRow label="Tip" color="var(--tip)" file={tipFile} onLoad={setTipFile} />
+            <FileRow label="Root" color="var(--root)" file={rootFile} onLoad={(f) => { setRootFile(f); patch({ plan: null }); }} />
+            <FileRow label="Tip" color="var(--tip)" file={tipFile} onLoad={(f) => { setTipFile(f); patch({ plan: null }); }} />
             <button onClick={loadExample}>Load V-tail example</button>
           </section>
 
@@ -152,14 +176,33 @@ export function App() {
             <NumberField label="Block span" value={job.span} min={0} onChange={(v) => patch({ span: v })} hint="Distance from the root face to the tip face" />
             <NumberField label="Root face from left carriage" value={job.rootFaceFromLeft} onChange={(v) => patch({ rootFaceFromLeft: v })} />
             <SelectField label="Root on" value={job.rootSide} options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }]} onChange={(v) => patch({ rootSide: v })} />
-            <button
-              style={{ marginBottom: 8 }}
-              onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}
-            >
+            <button style={{ marginBottom: 8 }} onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}>
               Center block ({machine.carriageSpacing} {u} wire)
             </button>
             <NumberField label="Part offset X" value={job.offset.x} onChange={(v) => patch({ offset: { ...job.offset, x: v } })} />
             <NumberField label="Part offset Y" value={job.offset.y} onChange={(v) => patch({ offset: { ...job.offset, y: v } })} />
+          </section>
+
+          <section>
+            <h2>Foam block outline ({u})</h2>
+            <NumberField label="Left edge X" value={job.block.x} onChange={(v) => patch({ block: { ...job.block, x: v } })} />
+            <NumberField label="Bottom Y" value={job.block.y} onChange={(v) => patch({ block: { ...job.block, y: v } })} />
+            <NumberField label="Width" value={job.block.w} min={0} onChange={(v) => patch({ block: { ...job.block, w: v } })} />
+            <NumberField label="Height" value={job.block.h} min={0} onChange={(v) => patch({ block: { ...job.block, h: v } })} hint="0 = no block; jog checks are off" />
+            <button disabled={!profiles.length} onClick={() => patch({ block: fitBlock(profiles, job.offset, 0.1) })}>
+              Fit block to part
+            </button>
+          </section>
+
+          {plan && result && (
+            <PlanPanel plan={plan} result={result} onChange={setPlan} onLoop={() => patch({ plan: loopPlan(result.stats.segments) })} onLeTe={applyLeTe} selected={selectedStep} onSelect={setSelectedStep} />
+          )}
+          <section>
+            <NumberField label={`Template clearance (${u})`} value={clearance} min={0} onChange={setClearance} hint="How far outside the block the LE→TE template puts run-in/out and jog points" />
+            <NumberField label={`Out-and-back distance (${u})`} value={outBack} min={0} onChange={setOutBack} hint="How far past the split an out-and-back runs out" />
+            <small className="hint">
+              Jogs run at {machine.jogSpeed} {u}/min (machine preset).
+            </small>
           </section>
 
           <section>
@@ -185,33 +228,32 @@ export function App() {
                 <NumberField label={`Max step (${u})`} value={job.sampling.maxStep} min={0.001} onChange={(v) => v > 0 && patch({ sampling: { ...job.sampling, maxStep: v } })} />
               </>
             )}
-            <NumberField label="Corner split angle (°)" value={job.cornerSplitDeg} min={1} onChange={(v) => patch({ cornerSplitDeg: v })} hint="Corners sharper than this become sync points, in addition to entity boundaries" />
-          </section>
-
-          <section>
-            <h2>Lead-in waypoints</h2>
-            <small style={{ color: 'var(--muted)' }}>
-              One "x, y" per line ({u}). The wire goes home → these → loop start, and back the same way. Empty = straight line from home.
-            </small>
-            <textarea
-              value={leadText}
-              placeholder={`${machine.home.x}, 3`}
-              onChange={(e) => {
-                setLeadText(e.target.value);
-                patch({ leadIn: parseWaypoints(e.target.value) });
-              }}
-            />
+            <NumberField label="Corner split angle (°)" value={job.cornerSplitDeg} min={1} onChange={(v) => patch({ cornerSplitDeg: v, plan: null })} hint="Corners sharper than this become sync points, in addition to entity boundaries. Changing it resets the plan." />
           </section>
         </aside>
 
         <div className="workspace">
           <div style={{ position: 'relative', minHeight: 0, display: 'grid' }}>
-            <Preview2D root={root?.profile ?? null} tip={tip?.profile ?? null} offset={job.offset} result={result} machine={machine} layers={layers} />
+            <Preview2D
+              root={root?.profile ?? null}
+              tip={tip?.profile ?? null}
+              offset={job.offset}
+              result={result}
+              machine={machine}
+              layers={layers}
+              block={job.block}
+              plan={plan}
+              onPlanChange={setPlan}
+              outBackDistance={outBack}
+              selectedStep={selectedStep}
+              onSelectStep={setSelectedStep}
+            />
             <div className="layers">
               {(
                 [
                   ['profiles', 'Profiles'],
-                  ['kerf', 'Kerf path'],
+                  ['kerf', 'Kerf loop'],
+                  ['plan', 'Cut plan'],
                   ['wires', 'Wire lines'],
                   ['carriages', 'Carriage paths'],
                 ] as [keyof Layers, string][]
@@ -228,11 +270,14 @@ export function App() {
             {result && (
               <div className="stats">
                 <span>Segments <b>{result.stats.segments}</b></span>
+                <span>Steps <b>{plan?.steps.length ?? 0}</b></span>
                 <span>Moves <b>{result.stats.moves}</b></span>
-                <span>Cut time <b>{result.stats.cutMinutes.toFixed(1)} min</b></span>
+                <span>Time <b>{result.stats.cutMinutes.toFixed(1)} min</b></span>
                 <span>Max carriage speed <b>{result.stats.maxCarriageSpeed.toFixed(2)} {u}/min</b> (cap {machine.maxSpeed})</span>
                 <span>
-                  <span className="swatch" style={{ background: 'var(--left)' }} />left
+                  <span className="swatch" style={{ background: 'var(--cut)' }} />cut
+                  <span className="swatch" style={{ background: 'var(--jog)', marginLeft: 8 }} />jog
+                  <span className="swatch" style={{ background: 'var(--left)', marginLeft: 8 }} />left
                   <span className="swatch" style={{ background: 'var(--right)', marginLeft: 8 }} />right carriage
                 </span>
               </div>

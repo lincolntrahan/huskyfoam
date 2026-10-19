@@ -14,6 +14,21 @@ Everything runs in the browser, so files never leave your computer. See [docs/SP
 
 Preview controls: scroll to zoom, drag to pan, double-click to re-fit.
 
+### Cut plan: run-outs, jogs and run-ins
+
+By default the wire goes once around the whole profile (the **Loop** plan). You can change that:
+
+- **LE→TE top & bottom**: cuts the upper surface LE→TE, runs out, jogs back over the foam block, runs in, then cuts the lower surface LE→TE. Set the foam block outline first ("Fit block to part" works).
+- **Click a split marker** to get these options:
+  - *Run out from here*: click to place points, then click another split marker to run back in, or press Enter / double-click to stop.
+  - *Out-and-back here*: for thin trailing edges and points; runs out past the point and straight back.
+- **Click a line** to switch it between cut and jog, insert a point, reverse it, or delete it.
+- **Drag** the round handles to move points. Shift-drag splits a point into separate root and tip ends.
+- The **step list** in the sidebar lets you reorder, reverse and delete steps.
+  - If the path jumps somewhere, a red gap row appears with *Bridge with jog / cut*. Export is blocked until every gap is closed.
+
+Jogs are sent as coordinated `G1` moves at the machine's jog speed. You get a warning if a jog passes through the foam block, a cut line stops inside it, or a segment is never cut (or is cut twice).
+
 ### How profiles are matched
 
 Each profile is split into segments at every DXF entity boundary and at sharp corners. Segment *N* on the root is cut together with segment *N* on the tip. Both profiles therefore need the same number of segments. The easiest way to get that is to draw root and tip with the same entities (e.g. 2 splines + tab lines), as in the example.

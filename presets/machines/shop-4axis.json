@@ -5,6 +5,7 @@
   "carriageSpacing": 36,
   "travel": { "x": [0, 40], "y": [0, 20] },
   "maxSpeed": 30,
+  "jogSpeed": 20,
   "home": { "x": 4.005, "y": 0.164 },
   "axes": { "leftH": "X", "leftV": "Y", "rightH": "Z", "rightV": "A" },
   "axisOrder": ["leftH", "leftV", "rightH", "rightV"],

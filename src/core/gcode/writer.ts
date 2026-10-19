@@ -7,8 +7,11 @@ export interface Move {
   right: Vec2;
   /** Duration in minutes. */
   minutes: number;
-  /** Part of the lead-in/lead-out rather than the profile loop. */
+  /** Made by an inserted line (lead-in/out, run-out, jog) rather than a profile segment. */
   lead: boolean;
+  speed?: 'cut' | 'jog';
+  /** Plan step that produced this move. */
+  step?: number;
 }
 
 export interface CarriagePos {

@@ -20,6 +20,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     cutSpeed: material.cutSpeed,
     sampling: { mode: 'adaptive', step: 0.04, tolerance: 0.001, maxStep: 0.1 },
     cornerSplitDeg: 30,
-    leadIn: [],
+    block: { x: 0, y: 0, w: 0, h: 0 },
+    plan: null,
   };
 }
