@@ -348,7 +348,7 @@ Libraries:
 
 *Done when: our output matches DevFoam's on the reference part within tolerance, and someone can cut from it.*
 
-**M2a — Cut plan** (next; requested after M1)
+**M2a — Cut plan**: ✅ done (PR #1)
 - Plan model + walk (segments fwd/rev, line steps, shared points), replacing M1's waypoint lead-in
 - Foam block rectangle on the job; jog speed on the machine preset
 - Templates: Loop (default, M1-identical), LE→TE top & bottom, Out-and-back at a split
@@ -374,4 +374,4 @@ Libraries:
 ## 10. Open items
 1. **Machine facts**: carriage spacing, travel limits, max speed, **jog speed**, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay). The `shop-4axis` preset is a placeholder until then.
 2. **What "4inback" means** in the example filename (block offset? lead-in?), and why the DevFoam file runs "a little weird" on the machine. That may point to something our output should do differently.
-3. **Hosting**: the repo is private (lincolntrahan/huskyfoam). GitHub Pages on a private repo needs a paid plan, so either make it public, use GitHub Pro, or move it to the team org.
+3. **Hosting**: resolved. The repo is public and deploys to https://lincolntrahan.github.io/huskyfoam/ on every push to `main`. Moving it to the team org later is still an option.

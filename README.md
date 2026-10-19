@@ -2,6 +2,8 @@
 
 A browser app for cutting tapered foam parts (wing cores, tail surfaces) on a 4-axis hot-wire CNC. It replaces the DevFoam "tapered part" workflow: load a root and a tip DXF, check the sync and kerf in the preview, and export Mach3 G-code.
 
+**Use it:** https://lincolntrahan.github.io/huskyfoam/
+
 Everything runs in the browser, so files never leave your computer. See [docs/SPEC.md](docs/SPEC.md) for the full design and roadmap.
 
 ## Using it
