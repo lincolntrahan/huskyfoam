@@ -10,8 +10,8 @@
   "maxSpeed": 30,
   "jogSpeed": 20,
   "home": {
-    "x": 4.005,
-    "y": 0.164
+    "x": 0,
+    "y": 0
   },
   "axes": {
     "leftH": "X",

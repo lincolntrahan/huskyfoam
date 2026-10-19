@@ -400,6 +400,12 @@ Libraries:
 - **Default plan**: with automatic sync, the outline gets a split at its closest point to each other contour, and each closed contour starts at its point nearest that split. The Loop template cuts in along a cut line, all the way round (open: to the end and back), and back out to the same outline split before continuing.
 - **Kerf side** per pair: outside / inside (closed), left / right of drawing direction (open), or none. Auto is outside for the outline, inside for holes (contours inside the outline), none for open contours. Offsetting left is offsetting right along the reversed path.
 
+**M2d — Automatic placement** (PR #11)
+- Pages 2 and 3 swap: *Arrange Profiles* (profile distance, transforms; drag a profile to move it relative to the other) comes before *Place in Machine* (machine, material, placement, block).
+- `job.layout`: left carriage to left profile plane (dual left/right entry), floor offset, block size (w, h, len) and three alignments (along the wire, along the chord, vertical).
+- `placeJob` resolves it before cutting: profile planes from the layout; part offset Y so the lowest profile point is the floor offset above Y = 0; part offset X so the closest carriage position on the kerfed cut is at the travel minimum; block rectangle and ends from the alignments. A first cut at zero offset supplies the geometry (the cut is translation-invariant). While a profile is dragged the offset is held.
+- Shop machine home is (0, 0). Older projects get a layout that keeps their profile planes and block size.
+
 **M3 — Visualization & polish**
 - 3D view with playback
 - Open/compare existing `.nc`
@@ -409,6 +415,6 @@ Libraries:
 ---
 
 ## 10. Open items
-1. **Machine facts**: carriage spacing (43.25 in) and travel (29 x 12.5 in) are in. Still needed: max speed, **jog speed**, home position, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay).
+1. **Machine facts**: carriage spacing (43.25 in) and travel (29 x 12.5 in) are in. Home is (0, 0). Still needed: max speed, **jog speed**, and whether Mach3 needs anything beyond `M3`/`M5` (e.g. a wire-heat `S` value or a spindle delay).
 2. **What "4inback" means** in the example filename (block offset? lead-in?), and why the DevFoam file runs "a little weird" on the machine. That may point to something our output should do differently.
 3. **Hosting**: resolved. The repo is public and deploys to https://lincolntrahan.github.io/huskyfoam/ on every push to `main`. Moving it to the team org later is still an option.

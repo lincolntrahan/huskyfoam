@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
+import { defaultLayout, placeJob } from '../core/cut/placement';
 import type { Profile } from '../core/geom/profile';
 import type { Vec2 } from '../core/geom/vec';
 import { loadDxfProfile } from '../core/io/loadProfile';
@@ -74,10 +75,32 @@ export function App() {
   const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units, job.selection.tip) : null), [tipFile, machine.units, job.selection.tip]);
   /** Changing which entities make up a profile changes its splits, so sync and plan start over. */
   const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, contours: noContours(), plan: null });
+  // While a profile is being dragged the part offset is held, so it doesn't jump under the cursor.
+  const [hold, setHold] = useState<Vec2 | null>(null);
+  const dragStart = useRef<Vec2 | null>(null);
+  /** The job with its layout resolved: profile planes, part offset and block worked out. */
+  const placed = useMemo(() => placeJob(job, root?.contours ?? [], tip?.contours ?? [], machine, hold), [root, tip, job, machine, hold]);
   const result = useMemo(
-    () => (root?.contours.length && tip?.contours.length ? generateCut(root.contours, tip.contours, job, machine) : null),
-    [root, tip, job, machine],
+    () => (root?.contours.length && tip?.contours.length ? generateCut(root.contours, tip.contours, placed, machine) : null),
+    [root, tip, placed, machine],
   );
+  /** Drag one profile on Arrange Profiles: moves it relative to the other. */
+  const onProfileDrag = (side: 'root' | 'tip', phase: 'start' | 'move' | 'end', delta: Vec2) => {
+    if (phase === 'start') {
+      dragStart.current = job.transforms[side].move;
+      setHold(placed.offset);
+      return;
+    }
+    const start = dragStart.current;
+    if (start) {
+      const move = { x: start.x + delta.x, y: start.y + delta.y };
+      setJob((j) => ({ ...j, transforms: { ...j.transforms, [side]: { ...j.transforms[side], move } } }));
+    }
+    if (phase === 'end') {
+      dragStart.current = null;
+      setHold(null);
+    }
+  };
   const plan: CutPlan | null = result?.plan ?? null;
 
   // ---- pages
@@ -160,8 +183,8 @@ export function App() {
   const cutPts = (): Vec2[] =>
     result?.profilePts.root.length
       ? [...result.profilePts.root, ...result.profilePts.tip]
-      : profiles.flatMap((p) => p.pts).map((p) => ({ x: p.x + job.offset.x, y: p.y + job.offset.y }));
-  const blockOrFit = (): Rect => (job.block.w > 0 && job.block.h > 0 ? job.block : fitBlock(cutPts(), 0.1));
+      : profiles.flatMap((p) => p.pts).map((p) => ({ x: p.x + placed.offset.x, y: p.y + placed.offset.y }));
+  const blockOrFit = (): Rect => (placed.block.w > 0 && placed.block.h > 0 ? placed.block : fitBlock(cutPts(), 0.1));
 
   // Sync edits arrive in cut space (what's on screen); store them in the job's raw form.
   const onSyncChange = (e: SyncEdit) => {
@@ -181,18 +204,17 @@ export function App() {
   const loadExample = () => {
     const rootLoaded = loadDxfProfile(exampleRoot, machine.units).profile!;
     const tipLoaded = loadDxfProfile(exampleTip, machine.units).profile!;
-    const offset = { x: 4.7221, y: 0.7001 };
     setRootFile({ name: 'Vtail bottom.DXF (example)', text: exampleRoot });
     setTipFile({ name: 'Vtail top.DXF (example)', text: exampleTip });
     setSelectedStep(null);
-    // Back-solved from the DevFoam export of this part.
+    // Span and kerf back-solved from the DevFoam export of this part; the block just holds both profiles.
+    const fit = fitBlock([...rootLoaded.pts, ...tipLoaded.pts], 0.1);
     patch({
       span: 12.07,
-      rootFaceFromLeft: (machine.carriageSpacing - 12.07) / 2,
+      profile: { distance: 12.07, inset: null },
+      layout: { ...defaultLayout(machine, 12.07), block: { w: fit.w, h: fit.h, len: 12.07 } },
       rootSide: 'left',
       kerf: { mode: 'fixed', root: 0.0998, tip: 0.1116 },
-      offset,
-      block: fitBlock([...rootLoaded.pts, ...tipLoaded.pts].map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })), 0.1),
       sync: null,
       contours: noContours(),
       plan: null,
@@ -206,13 +228,14 @@ export function App() {
     setSelectedStep(null);
     // LE / TE come from the outer contour's splits
     const outer = result.splitPts.root.slice(0, result.pairs[0]?.sync.root.length ?? 0);
-    patch({ block, plan: leTePlan({ splits: outer, block, clearance }) });
+    patch({ plan: leTePlan({ splits: outer, block, clearance }) });
   };
 
   const baseName = (rootFile?.name ?? 'cut').replace(/\.[^.]+$/, '').replace(/\s*\(example\)$/, '');
 
   const ctx: PageCtx = {
     job,
+    placed,
     patch,
     result,
     plan,
@@ -335,7 +358,7 @@ export function App() {
             )}
             {view3d && page !== 'import' ? (
               <Suspense fallback={<div className="canvas-wrap"><div className="empty">Loading 3D view…</div></div>}>
-                <View3D result={result} job={job} machine={machine} mode={page} />
+                <View3D result={result} job={placed} machine={machine} mode={page} />
               </Suspense>
             ) : page === 'import' ? (
               <div className="pickers">
@@ -355,11 +378,12 @@ export function App() {
               mode={page}
               root={root?.contours ?? []}
               tip={tip?.contours ?? []}
-              offset={job.offset}
+              offset={placed.offset}
               result={result}
               machine={machine}
               layers={layers}
-              block={job.block}
+              block={placed.block}
+              onProfileDrag={onProfileDrag}
               plan={plan}
               onPlanChange={(p) => patch({ plan: p })}
               outBackDistance={outBack}

@@ -8,11 +8,14 @@ Everything runs in the browser, so files never leave your computer. See [docs/SP
 
 ## Using it
 
-1. Pick the machine and material at the top.
-2. Open the **root** and **tip** DXFs, or click **Load V-tail example**.
-3. Set the block placement, kerf and speed.
-4. In the preview, check that the numbered sync points line up (1 ↔ 1, 2 ↔ 2, …) and that the grey wire lines look right.
-5. **Export G-code**.
+The app walks you through seven pages:
+
+1. **Import Geometry**: open the **root** and **tip** DXFs, or click **Load V-tail example**.
+2. **Arrange Profiles**: set the distance between the profiles and how they sit relative to each other (twist, scale, move, flip).
+3. **Place in Machine**: pick the machine and material, say where the profiles are along the wire, how high above the floor, and the foam block.
+4. **Segment Profiles**: check that the numbered sync points line up (1 ↔ 1, 2 ↔ 2, …).
+5. **Sequence Cuts**: the order of the cut, run-outs and jogs.
+6. **Preview Cut Path** and 7. **Export G-Code**.
 
 Preview controls: scroll to zoom, drag to pan, double-click to re-fit.
 
@@ -41,13 +44,18 @@ A profile can have more than one contour: the closed outer outline plus holes (s
   - Open contours: left or right of the direction they were drawn in. *Auto* is none, so the wire runs on the line.
   - Turn on the kerf layer to check which side was used.
 
-### Block position (Define Setup)
+### Placing the part (Place in Machine)
 
-Setup talks in left and right carriages, like DevFoam:
+You only arrange the profiles relative to each other (on *Arrange Profiles*). Where the part sits on the machine is worked out from a few settings:
 
-- Enter the **block width** (left face to right face, along the wire).
-- Then measure the gap from **either** carriage to the block. Typing the left gap fills in the right one (right = carriage spacing − width − left), and the other way round.
-- **Root profile on** picks which carriage cuts the root DXF.
+- **Along the wire**: measure from **either** carriage to its profile. Typing the left gap fills in the right one (right = carriage spacing − profile distance − left), and the other way round. **Root profile on** picks which carriage cuts the root DXF.
+- **Height above floor**: the lowest point of either profile sits this far above Y = 0.
+- **X**: the part is pushed toward X = 0 as far as it can go without any carriage move going past the machine's travel limit.
+- **Foam block**: its width (along the chord), height and length (along the wire). Three dropdowns place it around the profiles:
+  - along the wire: profiles centred, or the left/right profile on that block face;
+  - along the chord: profiles centred, or against the −X or +X side;
+  - vertically: profiles in the middle, on the bottom face, or against the top face.
+- *Fit block to profiles* sizes the block to just hold both profiles.
 
 ### 3D view
 
@@ -88,9 +96,10 @@ The **Transforms** section adjusts each profile without going back to CAD:
   - It is **added on top of** any twist already drawn in your DXFs. If the CAD profiles already include washout, leave it at 0.
   - It rotates about a pivot: 25% chord by default, or the LE, the TE, or a typed point.
   - The LE/TE are found automatically, ignoring straight tabs. To use your own, click a split marker → *Use as LE / TE*.
-- **Scale** and **Move**: per profile. *Link root & tip* (on by default) applies them to both.
+- **Scale**: per profile. *Link root & tip* (on by default) applies it to both.
+- **Move**: per profile, relative to the other one. You can also **drag a profile on the canvas**; a plain click on the outline still sets the LE / TE.
 - **Flip horizontal / vertical**: applies to both profiles (cut TE-first or upside down; both together = rotate 180°). Flipping resets the cut plan, since segment numbering changes.
-- **Mirror L/R** (next to *Root on*): cuts the opposite-hand panel by putting the root on the other carriage.
+- **Mirror L/R** (on *Place in Machine*, next to *Root profile on*): cuts the opposite-hand panel by putting the root on the other carriage.
 
 The canvas shows each profile's chord line with LE/TE labels and a cross at the pivot.
 

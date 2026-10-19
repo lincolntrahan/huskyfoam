@@ -46,6 +46,8 @@ interface Props {
   onSyncChange: (e: SyncEdit) => void;
   /** Use split k on one profile as its LE or TE (for the twist pivot). */
   onChordPick: (side: Side, end: 'le' | 'te', s: number) => void;
+  /** Arrange Profiles: a profile is being dragged by `delta` (world units) from where it was grabbed. */
+  onProfileDrag?: (side: Side, phase: 'start' | 'move' | 'end', delta: Vec2) => void;
 }
 
 interface Box {
@@ -175,6 +177,8 @@ export function Preview2D(props: Props) {
   const pointDrag = useRef<{ id: string; role: 'p' | 'r' | 't' } | null>(null);
   // Pressing a split or pin marker: a drag slides it along its profile, a plain click opens its menu.
   const syncDrag = useRef<{ kind: 'split' | 'pin'; side: Side; i: number; x: number; y: number; moved: boolean } | null>(null);
+  // Pressing a profile on Arrange Profiles: a drag moves that profile, a plain click opens the LE / TE menu.
+  const profileDrag = useRef<{ side: Side; pair: number; x: number; y: number; at: Vec2; moved: boolean } | null>(null);
 
   const toWorld = (clientX: number, clientY: number): Vec2 => {
     const svg = svgRef.current!;
@@ -485,6 +489,15 @@ export function Preview2D(props: Props) {
           capture(e.pointerId);
         }}
         onPointerMove={(e) => {
+          const prd = profileDrag.current;
+          if (prd) {
+            if (!prd.moved && Math.hypot(e.clientX - prd.x, e.clientY - prd.y) < 4) return;
+            if (!prd.moved) props.onProfileDrag?.(prd.side, 'start', { x: 0, y: 0 });
+            prd.moved = true;
+            const w = toWorld(e.clientX, e.clientY);
+            props.onProfileDrag?.(prd.side, 'move', sub(w, prd.at));
+            return;
+          }
           const sd = syncDrag.current;
           if (sd) {
             if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
@@ -515,6 +528,14 @@ export function Preview2D(props: Props) {
           } else if (drawing) setDrawing({ ...drawing, cursor: toWorld(e.clientX, e.clientY) });
         }}
         onPointerUp={(e) => {
+          const prd = profileDrag.current;
+          if (prd) {
+            profileDrag.current = null;
+            if (prd.moved) props.onProfileDrag?.(prd.side, 'end', sub(toWorld(e.clientX, e.clientY), prd.at));
+            // LE / TE picks are on the outer contour only
+            else if (prd.pair === 0) setMenu({ kind: 'profile', side: prd.side, pair: 0, s: sOnProfile(prd.side, toWorld(e.clientX, e.clientY), 0), ...toWrap(e.clientX, e.clientY) });
+            return;
+          }
           const sd = syncDrag.current;
           if (sd) {
             syncDrag.current = null;
@@ -613,22 +634,28 @@ export function Preview2D(props: Props) {
           <g fill="none">
             {(['root', 'tip'] as Side[]).map((side) =>
               (side === 'root' ? showR : showT)
-                ? pairs.map((pr, i) =>
-                    // LE / TE picks are on the outer contour only
-                    edit.chord && i > 0 ? null : (
-                      <Outline
-                        key={`hit-${side}-${i}`}
-                        className="clickable"
-                        pts={pr.pts[side]}
-                        closed={pr.closed}
-                        stroke="transparent"
-                        strokeWidth={10}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => profileClick(side, i, e)}
-                        title={edit.chord ? 'Click to set the LE or TE here' : 'Click to add a split or pin'}
-                      />
-                    ),
-                  )
+                ? pairs.map((pr, i) => (
+                    <Outline
+                      key={`hit-${side}-${i}`}
+                      className={edit.chord ? 'grab' : 'clickable'}
+                      pts={pr.pts[side]}
+                      closed={pr.closed}
+                      stroke="transparent"
+                      strokeWidth={10}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        if (!edit.chord) return;
+                        profileDrag.current = { side, pair: i, x: e.clientX, y: e.clientY, at: toWorld(e.clientX, e.clientY), moved: false };
+                        capture(e.pointerId);
+                      }}
+                      onClick={edit.chord ? undefined : (e) => profileClick(side, i, e)}
+                      title={
+                        edit.chord
+                          ? `Drag to move the ${side} relative to the ${side === 'root' ? 'tip' : 'root'}${i === 0 ? '; click to set its LE or TE here' : ''}`
+                          : 'Click to add a split or pin'
+                      }
+                    />
+                  ))
                 : null,
             )}
           </g>

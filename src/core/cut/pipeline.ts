@@ -18,7 +18,7 @@ import { kerfAt } from './kerfTable';
 import { applyToProfile, defaultTransforms, sideTransform, syncToRaw, syncToTransformed } from './transform';
 
 /** The job step a problem belongs to (matches the app's pages; 'path' = the finished cut path). */
-export type Stage = 'import' | 'setup' | 'transform' | 'segment' | 'sequence' | 'path';
+export type Stage = 'import' | 'transform' | 'setup' | 'segment' | 'sequence' | 'path';
 
 export interface CutWarning {
   message: string;
@@ -203,7 +203,7 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
   if (!rootList.length || !tipList.length) return emptyResult(['Both profiles need at least one contour.'], 'import');
 
   if (planes.inset < -1e-9 || planes.inset + planes.distance > job.span + 1e-9) {
-    warnings.push({ stage: 'transform', message: 'The profiles sit outside the foam block along the wire (check profile distance and inset against the block span).' });
+    warnings.push({ stage: 'setup', message: 'The profiles sit outside the foam block along the wire (the block is shorter than the profile distance, or a profile is past its face).' });
   }
   const T = job.transforms ?? defaultTransforms();
   if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.'], 'transform');
@@ -501,7 +501,9 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
   // 7. Travel limits
   const [x0, x1] = machine.travel.x;
   const [y0, y1] = machine.travel.y;
-  const outside = (p: Vec2) => p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1;
+  // a hair of tolerance: automatic placement puts a carriage exactly on the limit
+  const tol = 1e-9;
+  const outside = (p: Vec2) => p.x < x0 - tol || p.x > x1 + tol || p.y < y0 - tol || p.y > y1 + tol;
   const firstOut = moves.findIndex((m) => outside(m.left) || outside(m.right));
   if (firstOut >= 0) {
     const count = moves.filter((m) => outside(m.left) || outside(m.right)).length;

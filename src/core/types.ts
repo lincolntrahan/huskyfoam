@@ -3,6 +3,7 @@ import type { CutPlan } from './plan/model';
 import type { SyncSettings } from './sync/sync';
 import type { Transforms } from './cut/transform';
 import type { KerfSide } from './cut/contours';
+import type { Layout } from './cut/placement';
 
 export type Units = 'in' | 'mm';
 
@@ -90,7 +91,13 @@ export interface SamplingSettings {
 export interface JobSettings {
   /** DXF entities used for each profile (indices into the file); null = automatic pick. */
   selection: { root: number[] | null; tip: number[] | null };
-  /** Distance from the left carriage plane to the root face. */
+  /**
+   * How the part sits on the machine: profile position along the wire, floor offset, block size
+   * and alignment. The fields below it (rootFaceFromLeft, span, profile.inset, offset, block)
+   * are then worked out from it by placeJob. null = set those fields by hand (tests, old code).
+   */
+  layout: Layout | null;
+  /** Distance from the left carriage plane to the block's left face. */
   rootFaceFromLeft: number;
   /** Block span (root face to tip face). */
   span: number;
