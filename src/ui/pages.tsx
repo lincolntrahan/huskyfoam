@@ -101,6 +101,8 @@ function presetOptions(list: { id: string; name: string }[], origin: (id: string
   });
 }
 
+const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
+
 /** One line describing what the selected material sets (cut speed, kerf, power). */
 function materialSummary(job: JobSettings, u: string): string {
   const kerf =
@@ -171,16 +173,32 @@ export function SetupPage(c: PageCtx) {
 
       <section>
         <h2>Block on the machine ({u})</h2>
-        <NumberField label="Block span" value={job.span} min={0} onChange={(v) => patch({ span: v })} hint="Distance from the root face to the tip face" />
-        <NumberField label="Root face from left carriage" value={job.rootFaceFromLeft} onChange={(v) => patch({ rootFaceFromLeft: v })} />
-        <SelectField label="Root on" value={job.rootSide} options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }]} onChange={(v) => patch({ rootSide: v })} />
+        <small className="hint">
+          Carriages are {machine.carriageSpacing} {u} apart. Measure the gap from either carriage to the block; the other side follows.
+        </small>
+        <NumberField label="Block width" value={job.span} min={0} onChange={(v) => patch({ span: v })} hint="Left face to right face, along the wire" />
+        <div className="dual">
+          <NumberField label="Left carriage to block" value={job.rootFaceFromLeft} onChange={(v) => patch({ rootFaceFromLeft: v })} />
+          <NumberField
+            label="Right carriage to block"
+            value={round6(machine.carriageSpacing - job.span - job.rootFaceFromLeft)}
+            onChange={(v) => patch({ rootFaceFromLeft: machine.carriageSpacing - job.span - v })}
+          />
+        </div>
+        <SelectField
+          label="Root profile on"
+          value={job.rootSide}
+          options={[
+            { value: 'left', label: 'Left (tip on right)' },
+            { value: 'right', label: 'Right (tip on left)' },
+          ]}
+          onChange={(v) => patch({ rootSide: v })}
+        />
         <div className="row-buttons">
-          <button title="Cut the opposite-hand panel from the same files: puts the root on the other carriage" onClick={() => patch({ rootSide: job.rootSide === 'left' ? 'right' : 'left' })}>
+          <button title="Cut the opposite-hand panel from the same files: swaps which carriage gets the root" onClick={() => patch({ rootSide: job.rootSide === 'left' ? 'right' : 'left' })}>
             Mirror L/R
           </button>
-          <button onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}>
-            Center block ({machine.carriageSpacing} {u} wire)
-          </button>
+          <button onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}>Center block</button>
         </div>
         <NumberField label="Part offset X" value={job.offset.x} onChange={(v) => patch({ offset: { ...job.offset, x: v } })} hint="Where the profiles sit in machine X/Y" />
         <NumberField label="Part offset Y" value={job.offset.y} onChange={(v) => patch({ offset: { ...job.offset, y: v } })} />

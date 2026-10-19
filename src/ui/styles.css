@@ -228,3 +228,7 @@ button.wide { width: 100%; margin-top: 4px; }
 .playback button { min-width: 34px; }
 .hint3d { position: absolute; left: 8px; bottom: 54px; color: var(--muted); font-size: 11px; pointer-events: none; }
 .hint3d.low { bottom: 8px; }
+
+/* two fields side by side (left / right measurements) */
+.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dual .field { min-width: 0; grid-template-columns: 1fr; gap: 2px; }
