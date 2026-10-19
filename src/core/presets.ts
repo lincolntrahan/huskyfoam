@@ -1,3 +1,4 @@
+import { defaultTransforms } from './cut/transform';
 import type { JobSettings, MachinePreset, MaterialPreset } from './types';
 
 // Repo presets are bundled at build time; edit the JSON in /presets and commit to change them.
@@ -21,6 +22,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     sampling: { mode: 'adaptive', step: 0.04, tolerance: 0.001, maxStep: 0.1 },
     cornerSplitDeg: 30,
     block: { x: 0, y: 0, w: 0, h: 0 },
+    transforms: defaultTransforms(),
     sync: null,
     plan: null,
   };

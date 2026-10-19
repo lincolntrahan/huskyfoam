@@ -42,3 +42,26 @@ export function SelectField<T extends string>(props: { label: string; value: T; 
     </label>
   );
 }
+
+/** Bare number input (no label) for compact grids. */
+export function NumInput(props: { value: number; onChange: (v: number) => void; step?: number; title?: string; 'aria-label'?: string }) {
+  const [text, setText] = useState(show(props.value));
+  useEffect(() => {
+    if (parseFloat(text) !== props.value) setText(show(props.value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.value]);
+  return (
+    <input
+      type="number"
+      step={props.step ?? 'any'}
+      title={props.title}
+      aria-label={props['aria-label']}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const v = parseFloat(e.target.value);
+        if (Number.isFinite(v)) props.onChange(v);
+      }}
+    />
+  );
+}

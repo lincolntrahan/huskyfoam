@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CutResult } from '../core/cut/pipeline';
-import { nearestS, type ArcLoop } from '../core/geom/arc';
+import { nearestS } from '../core/geom/arc';
 import type { Profile } from '../core/geom/profile';
 import { add, normalize, perpR, scale, sub, type Vec2 } from '../core/geom/vec';
 import { insertOutAndBack, insertPointOnLine, insertRunOut, removeStep, reverseStep, setPoint, setSpeed } from '../core/plan/edit';
@@ -36,9 +36,10 @@ interface Props {
   onSelectStep: (i: number | null) => void;
   sides: Sides;
   rootSide: 'left' | 'right';
-  /** Arc-length views of the (unpositioned) profiles, for split and pin editing. */
-  arcs: { root: ArcLoop; tip: ArcLoop } | null;
+  /** Receives edits in cut space (result.sync numbering); the App stores them. */
   onSyncChange: (e: SyncEdit) => void;
+  /** Use split k on one profile as its LE or TE (for the twist pivot). */
+  onChordPick: (side: Side, end: 'le' | 'te', k: number) => void;
 }
 
 interface Box {
@@ -49,7 +50,7 @@ interface Box {
 }
 
 type Menu =
-  | { kind: 'split'; k: number; sx: number; sy: number }
+  | { kind: 'split'; k: number; side: Side; sx: number; sy: number }
   | { kind: 'line'; step: number; at: Vec2; sx: number; sy: number }
   | { kind: 'profile'; side: Side; s: number; sx: number; sy: number }
   | { kind: 'pin'; i: number; sx: number; sy: number };
@@ -108,8 +109,9 @@ export function Preview2D(props: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const shiftPts = (p: Profile | null) => (p ? p.pts.map((q) => ({ x: q.x + offset.x, y: q.y + offset.y })) : []);
-  const rootPts = useMemo(() => shiftPts(root), [root, offset]);
-  const tipPts = useMemo(() => shiftPts(tip), [tip, offset]);
+  const rootPts = useMemo(() => (result?.profilePts.root.length ? result.profilePts.root : shiftPts(root)), [result, root, offset]);
+  const tipPts = useMemo(() => (result?.profilePts.tip.length ? result.profilePts.tip : shiftPts(tip)), [result, tip, offset]);
+  const arcs = result?.arcs ?? null;
   const n = result?.stats.segments ?? 0;
   const carriage = useMemo(() => {
     if (!result?.moves.length) return { left: [] as Vec2[], right: [] as Vec2[] };
@@ -212,7 +214,7 @@ export function Preview2D(props: Props) {
   const unit = Math.max(vb.w, vb.h) / 100; // ~1% of the view, for marker and label sizes
   const splitPos = (side: Side, k: number): Vec2 | null => result?.splitPts[side][k] ?? null;
   /** Arc position on a profile nearest to a world point (profiles are drawn shifted by the part offset). */
-  const sOnProfile = (side: Side, w: Vec2) => (props.arcs ? nearestS(props.arcs[side], { x: w.x - offset.x, y: w.y - offset.y }).s : 0);
+  const sOnProfile = (side: Side, w: Vec2) => (arcs ? nearestS(arcs[side], w).s : 0);
   const sync = result?.sync ?? null;
 
   const outAndBackAt = (k: number) => {
@@ -274,9 +276,24 @@ export function Preview2D(props: Props) {
       );
     });
 
+  /** Thin chord line from LE to TE with a cross at the twist pivot. */
+  const chordMarks = (side: Side, color: string) => {
+    const c = result!.chord![side];
+    const r = unit * 0.6;
+    return (
+      <g key={`chord-${side}`} stroke={color} opacity={0.7} pointerEvents="none">
+        <line x1={c.le.x} y1={-c.le.y} x2={c.te.x} y2={-c.te.y} strokeDasharray="1 3" vectorEffect="non-scaling-stroke" />
+        <line x1={c.pivot.x - r} y1={-c.pivot.y - r} x2={c.pivot.x + r} y2={-c.pivot.y + r} vectorEffect="non-scaling-stroke" />
+        <line x1={c.pivot.x - r} y1={-c.pivot.y + r} x2={c.pivot.x + r} y2={-c.pivot.y - r} vectorEffect="non-scaling-stroke" />
+        <text x={c.le.x} y={-c.le.y + unit * 2.6} fontSize={unit * 1.2} fill={color} stroke="none" textAnchor="middle">LE</text>
+        <text x={c.te.x} y={-c.te.y + unit * 2.6} fontSize={unit * 1.2} fill={color} stroke="none" textAnchor="middle">TE</text>
+      </g>
+    );
+  };
+
   const profileClick = (side: Side, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!props.arcs) return;
+    if (!arcs) return;
     setMenu({ kind: 'profile', side, s: sOnProfile(side, toWorld(e.clientX, e.clientY)), ...toWrap(e.clientX, e.clientY) });
   };
 
@@ -354,12 +371,12 @@ export function Preview2D(props: Props) {
           if (sd) {
             if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
             sd.moved = true;
-            if (!sync || !props.arcs || drawing) return;
+            if (!sync || !arcs || drawing) return;
             const sNew = sOnProfile(sd.side, toWorld(e.clientX, e.clientY));
             if (sd.kind === 'split') {
-              const ed = moveSplit(sync, plan, props.arcs, sd.side, sd.i, sNew);
+              const ed = moveSplit(sync, plan, arcs, sd.side, sd.i, sNew);
               if (ed) props.onSyncChange(ed);
-            } else props.onSyncChange({ sync: movePin(sync, props.arcs, sd.i, sd.side, sNew), plan });
+            } else props.onSyncChange({ sync: movePin(sync, arcs, sd.i, sd.side, sNew), plan });
             return;
           }
           const pd = pointDrag.current;
@@ -385,7 +402,7 @@ export function Preview2D(props: Props) {
             syncDrag.current = null;
             if (sd.moved) return;
             if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
-            else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, ...toWrap(e.clientX, e.clientY) });
+            else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
             else setMenu({ kind: 'pin', i: sd.i, ...toWrap(e.clientX, e.clientY) });
             return;
           }
@@ -479,7 +496,7 @@ export function Preview2D(props: Props) {
             />
           )}
         </g>
-        {layers.profiles && props.arcs && !drawing && (
+        {layers.profiles && arcs && !drawing && (
           <g fill="none">
             {showR && (
               <polygon className="clickable" points={pts(rootPts)} stroke="transparent" strokeWidth={10} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => profileClick('root', e)}>
@@ -499,6 +516,8 @@ export function Preview2D(props: Props) {
           result.pinPts.root.map((p, i) => (
             <line key={`pinlink-${i}`} x1={p.x} y1={-p.y} x2={result.pinPts.tip[i].x} y2={-result.pinPts.tip[i].y} stroke="var(--pin)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
           ))}
+        {result?.chord && layers.profiles && showR && chordMarks('root', 'var(--root)')}
+        {result?.chord && layers.profiles && showT && chordMarks('tip', 'var(--tip)')}
         {result && showR && pins('root', -0.6)}
         {result && showT && pins('tip', 2)}
         {result && showR && markers('root', 'var(--root)', -0.6)}
@@ -517,10 +536,12 @@ export function Preview2D(props: Props) {
         <div className="popover" style={{ left: menu.sx, top: menu.sy }} onPointerDown={(e) => e.stopPropagation()}>
           {menu.kind === 'split' ? (
             <>
-              <div className="popover-title">Split {menu.k + 1}</div>
+              <div className="popover-title">Split {menu.k + 1} ({menu.side})</div>
               {menuItem('Run out from here…', () => setDrawing({ fromSplit: menu.k, pts: [], cursor: null }))}
               {menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
               {sync && menu.k !== 0 && menuItem('Make loop start', () => props.onSyncChange(setLoopStart(sync, plan, menu.k)))}
+              {menuItem(`Use as ${menu.side} LE (twist pivot)`, () => props.onChordPick(menu.side, 'le', menu.k))}
+              {menuItem(`Use as ${menu.side} TE (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.k))}
               {sync &&
                 sync.root.length > 1 &&
                 menuItem('Remove split (both profiles)', () => {
@@ -532,15 +553,15 @@ export function Preview2D(props: Props) {
             <>
               <div className="popover-title">{menu.side === 'root' ? 'Root' : 'Tip'} profile</div>
               {sync &&
-                props.arcs &&
+                arcs &&
                 menuItem('Add split here (+ matching one on the other profile)', () => {
-                  const ed = addSplit(sync, plan, props.arcs!, menu.side, menu.s);
+                  const ed = addSplit(sync, plan, arcs, menu.side, menu.s);
                   if (ed) props.onSyncChange(ed);
                 })}
               {sync &&
-                props.arcs &&
+                arcs &&
                 menuItem('Add pin here (+ matching one on the other profile)', () => {
-                  const next = addPin(sync, props.arcs!, menu.side, menu.s);
+                  const next = addPin(sync, arcs, menu.side, menu.s);
                   if (next) props.onSyncChange({ sync: next, plan });
                 })}
             </>

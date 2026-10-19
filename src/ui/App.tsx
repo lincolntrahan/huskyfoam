@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
-import { arcLoop } from '../core/geom/arc';
 import type { SyncEdit } from '../core/sync/edit';
+import type { Vec2 } from '../core/geom/vec';
 import type { Profile } from '../core/geom/profile';
 import { loadDxfProfile } from '../core/io/loadProfile';
 import type { CutPlan } from '../core/plan/model';
@@ -12,6 +12,7 @@ import exampleRoot from '../../tests/fixtures/vtail-root.dxf?raw';
 import exampleTip from '../../tests/fixtures/vtail-tip.dxf?raw';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel } from './PlanPanel';
+import { TransformPanel } from './TransformPanel';
 import { Preview2D, type Layers, type Sides } from './Preview2D';
 
 interface SourceFile {
@@ -29,8 +30,8 @@ function download(name: string, text: string) {
 }
 
 /** Bounding box of both positioned profiles, grown by `margin`. */
-function fitBlock(profiles: Profile[], offset: { x: number; y: number }, margin: number): Rect {
-  const pts = profiles.flatMap((p) => p.pts).map((p) => ({ x: p.x + offset.x, y: p.y + offset.y }));
+/** Bounding box of the given (already positioned) points, grown by `margin`. */
+function fitBlock(pts: Vec2[], margin: number): Rect {
   const xs = pts.map((p) => p.x);
   const ys = pts.map((p) => p.y);
   const r = (v: number) => Math.round(v * 1000) / 1000;
@@ -85,15 +86,7 @@ export function App() {
 
   const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units) : null), [rootFile, machine.units]);
   const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units) : null), [tipFile, machine.units]);
-  const arcs = useMemo(
-    () => (root?.profile && tip?.profile ? { root: arcLoop(root.profile), tip: arcLoop(tip.profile) } : null),
-    [root, tip],
-  );
   const [notice, setNotice] = useState<string | null>(null);
-  const onSyncChange = (e: SyncEdit) => {
-    patch({ sync: e.sync, plan: e.plan });
-    setNotice(e.note ?? null);
-  };
   const result = useMemo(
     () => (root?.profile && tip?.profile ? generateCut(root.profile, tip.profile, job, machine) : null),
     [root, tip, job, machine],
@@ -109,7 +102,24 @@ export function App() {
   ];
 
   const profiles = [root?.profile, tip?.profile].filter((p): p is Profile => !!p);
-  const blockOrFit = (): Rect => (job.block.w > 0 && job.block.h > 0 ? job.block : fitBlock(profiles, job.offset, 0.1));
+  // the outlines as cut (transformed); before the first result, the raw outlines at the part offset
+  const cutPts = (): Vec2[] =>
+    result?.profilePts.root.length
+      ? [...result.profilePts.root, ...result.profilePts.tip]
+      : profiles.flatMap((p) => p.pts).map((p) => ({ x: p.x + job.offset.x, y: p.y + job.offset.y }));
+  const blockOrFit = (): Rect => (job.block.w > 0 && job.block.h > 0 ? job.block : fitBlock(cutPts(), 0.1));
+
+  // Sync edits arrive in cut space (what's on screen); store them in the job's raw form.
+  const onSyncChange = (e: SyncEdit) => {
+    if (!result?.syncToJob) return;
+    patch({ sync: result.syncToJob(e.sync), plan: e.plan });
+    setNotice(e.note ?? null);
+  };
+  const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', k: number) => {
+    if (!result?.sync || !result.rawS) return;
+    const s = result.rawS(side, result.sync[side][k]);
+    patch({ transforms: { ...job.transforms, [side]: { ...job.transforms[side], [end]: s } } });
+  };
 
   const loadExample = () => {
     const rootLoaded = loadDxfProfile(exampleRoot, machine.units).profile!;
@@ -125,7 +135,7 @@ export function App() {
       rootSide: 'left',
       kerf: { root: 0.0998, tip: 0.1116 },
       offset,
-      block: fitBlock([rootLoaded, tipLoaded], offset, 0.1),
+      block: fitBlock([...rootLoaded.pts, ...tipLoaded.pts].map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })), 0.1),
       sync: null,
       plan: null,
     });
@@ -189,6 +199,13 @@ export function App() {
             <NumberField label="Block span" value={job.span} min={0} onChange={(v) => patch({ span: v })} hint="Distance from the root face to the tip face" />
             <NumberField label="Root face from left carriage" value={job.rootFaceFromLeft} onChange={(v) => patch({ rootFaceFromLeft: v })} />
             <SelectField label="Root on" value={job.rootSide} options={[{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }]} onChange={(v) => patch({ rootSide: v })} />
+            <button
+              style={{ marginBottom: 8, marginRight: 6 }}
+              title="Cut the opposite-hand panel from the same files: puts the root on the other carriage"
+              onClick={() => patch({ rootSide: job.rootSide === 'left' ? 'right' : 'left' })}
+            >
+              Mirror L/R
+            </button>
             <button style={{ marginBottom: 8 }} onClick={() => patch({ rootFaceFromLeft: (machine.carriageSpacing - job.span) / 2 })}>
               Center block ({machine.carriageSpacing} {u} wire)
             </button>
@@ -202,7 +219,7 @@ export function App() {
             <NumberField label="Bottom Y" value={job.block.y} onChange={(v) => patch({ block: { ...job.block, y: v } })} />
             <NumberField label="Width" value={job.block.w} min={0} onChange={(v) => patch({ block: { ...job.block, w: v } })} />
             <NumberField label="Height" value={job.block.h} min={0} onChange={(v) => patch({ block: { ...job.block, h: v } })} hint="0 = no block; jog checks are off" />
-            <button disabled={!profiles.length} onClick={() => patch({ block: fitBlock(profiles, job.offset, 0.1) })}>
+            <button disabled={!profiles.length} onClick={() => patch({ block: fitBlock(cutPts(), 0.1) })}>
               Fit block to part
             </button>
           </section>
@@ -217,6 +234,12 @@ export function App() {
               Jogs run at {machine.jogSpeed} {u}/min (machine preset).
             </small>
           </section>
+
+          <TransformPanel
+            value={job.transforms}
+            units={u}
+            onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })}
+          />
 
           <section>
             <h2>Kerf & speed</h2>
@@ -269,8 +292,8 @@ export function App() {
               plan={plan}
               onPlanChange={setPlan}
               outBackDistance={outBack}
-              arcs={arcs}
               onSyncChange={onSyncChange}
+              onChordPick={onChordPick}
               selectedStep={selectedStep}
               onSelectStep={setSelectedStep}
               sides={sides}

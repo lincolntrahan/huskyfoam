@@ -1,6 +1,7 @@
 import type { Vec2 } from './geom/vec';
 import type { CutPlan } from './plan/model';
 import type { SyncSettings } from './sync/sync';
+import type { Transforms } from './cut/transform';
 
 export type Units = 'in' | 'mm';
 
@@ -74,7 +75,9 @@ export interface JobSettings {
   cornerSplitDeg: number;
   /** Foam block outline on the faces (same on both). w or h of 0 means "not set": no block checks. */
   block: { x: number; y: number; w: number; h: number };
-  /** Split and pin positions; null = automatic (entity boundaries + sharp corners). */
+  /** Twist / scale / move / flip per profile. */
+  transforms: Transforms;
+  /** Split and pin positions on the raw outlines; null = automatic (entity boundaries + sharp corners). */
   sync: SyncSettings | null;
   /** Cut plan; null = the default Loop template for however many segments the profiles have. */
   plan: CutPlan | null;

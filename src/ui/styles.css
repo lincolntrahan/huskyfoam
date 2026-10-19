@@ -166,3 +166,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 :root { --pin: #a21caf; }
 @media (prefers-color-scheme: dark) { :root { --pin: #e879f9; } }
 .msg.info { background: var(--sel); color: var(--text); display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+
+/* ---- Transforms ---- */
+.xf-row { display: grid; grid-template-columns: 1fr 84px 84px; gap: 6px; align-items: center; margin-bottom: 4px; }
+.xf-row input, .xf-row select { width: 100%; min-width: 0; }
+.xf-head span { font-size: 11px; font-weight: 600; }
+.xf-pair { display: flex; gap: 3px; align-items: center; min-width: 0; }
+.xf-pair button { padding: 1px 5px; font-size: 11px; }
+.check { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.warn-hint { color: var(--warn); }

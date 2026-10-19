@@ -1,13 +1,15 @@
-import { transformProfile, type Profile } from '../geom/profile';
+import { applyAffine } from '../geom/affine';
+import type { Profile } from '../geom/profile';
 import { dist, lerp, type Vec2 } from '../geom/vec';
 import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
 import type { CutPlan } from '../plan/model';
 import { loopPlan, type Rect } from '../plan/templates';
 import { splitOffsetLoop, walkPlan, type Gap, type PathPt } from '../plan/walk';
-import { arcLoop, pointAtS } from '../geom/arc';
+import { arcLoop, pointAtS, type ArcLoop } from '../geom/arc';
 import { autoSync, syncStations, type SyncSettings } from '../sync/sync';
 import type { JobSettings, MachinePreset } from '../types';
 import { offsetStations, type Station } from './kerf';
+import { applyToProfile, defaultTransforms, sideTransform, syncToRaw, syncToTransformed } from './transform';
 
 export interface CutWarning {
   message: string;
@@ -21,12 +23,25 @@ export interface CutResult {
   ok: boolean;
   errors: string[];
   warnings: CutWarning[];
-  /** Sync that was used (job.sync, or the automatic one), in loop order from the loop start. */
+  /**
+   * Sync as cut: positions on the transformed outlines (`arcs`), in the cut's loop order, so
+   * index k is split k+1 on the canvas and in the plan. Edit this, then store it with `syncToJob`.
+   */
   sync: SyncSettings | null;
+  /** The cut outlines (transformed + positioned) as arc loops, for editing splits and pins. */
+  arcs: { root: ArcLoop; tip: ArcLoop } | null;
+  /** Convert an edited cut-space sync back to the form stored in job.sync (raw outlines). */
+  syncToJob: ((s: SyncSettings) => SyncSettings) | null;
+  /** Convert a cut-space arc position to a raw-outline one (for LE/TE overrides). */
+  rawS: ((side: 'root' | 'tip', s: number) => number) | null;
   /** Positioned split points, in loop order (index = split number - 1). */
   splitPts: { root: Vec2[]; tip: Vec2[] };
   /** Positioned pin points. */
   pinPts: { root: Vec2[]; tip: Vec2[] };
+  /** Transformed + positioned outlines, as cut (before kerf). */
+  profilePts: { root: Vec2[]; tip: Vec2[] };
+  /** LE, TE and twist pivot of each profile, in machine face coordinates. */
+  chord: { root: { le: Vec2; te: Vec2; pivot: Vec2 }; tip: { le: Vec2; te: Vec2; pivot: Vec2 } } | null;
   /** Synced face stations before kerf (closed: last equals first). */
   stations: Station[];
   /** Kerf-offset face stations (closed). */
@@ -59,8 +74,13 @@ function emptyResult(errors: string[], warnings: CutWarning[] = []): CutResult {
     errors,
     warnings,
     sync: null,
+    arcs: null,
+    syncToJob: null,
+    rawS: null,
     splitPts: { root: [], tip: [] },
     pinPts: { root: [], tip: [] },
+    profilePts: { root: [], tip: [] },
+    chord: null,
     stations: [],
     kerfStations: [],
     plan: null,
@@ -100,33 +120,54 @@ export function crossesRect(a: Vec2, b: Vec2, r: Rect): boolean {
 const inside = (p: Vec2, r: Rect) => p.x > r.x + 1e-6 && p.x < r.x + r.w - 1e-6 && p.y > r.y + 1e-6 && p.y < r.y + r.h - 1e-6;
 
 export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, machine: MachinePreset): CutResult {
-  const shift = (p: Vec2) => ({ x: p.x + job.offset.x, y: p.y + job.offset.y });
-  const root = transformProfile(rootIn, shift);
-  const tip = transformProfile(tipIn, shift);
   const errors: string[] = [];
   const warnings: CutWarning[] = [];
 
   if (job.span <= 0) return emptyResult(['Block span must be greater than zero.']);
   if (job.cutSpeed <= 0) return emptyResult(['Cut speed must be greater than zero.']);
 
-  // 1. Splits (sync points) on each profile
+  const T = job.transforms ?? defaultTransforms();
+  if (!(T.root.scale > 0 && T.tip.scale > 0)) return emptyResult(['Scale must be greater than zero.']);
+
+  // 1. Transform each profile (twist / scale / flip / move about its pivot, then the part offset)
+  const raw = { root: arcLoop(rootIn), tip: arcLoop(tipIn) };
+  const st = {
+    root: sideTransform(rootIn, raw.root, T.root, T.flipH, T.flipV, job.offset),
+    tip: sideTransform(tipIn, raw.tip, T.tip, T.flipH, T.flipV, job.offset),
+  };
+  const root = applyToProfile(rootIn, st.root);
+  const tip = applyToProfile(tipIn, st.tip);
+  const profilePts = { root: root.pts, tip: tip.pts };
+  const chordOf = (k: 'root' | 'tip') => {
+    const c = st[k].chord;
+    return { le: applyAffine(st[k].affine, c.le), te: applyAffine(st[k].affine, c.te), pivot: applyAffine(st[k].affine, c.pivot) };
+  };
+  const chord = { root: chordOf('root'), tip: chordOf('tip') };
+
+  // 2. Splits (sync points). job.sync is stored on the raw outlines; auto sync is found on the cut shape.
   const rootArc = arcLoop(root);
   const tipArc = arcLoop(tip);
-  const sync = job.sync ?? autoSync(root, tip, job.cornerSplitDeg);
-  const splitPts = { root: sync.root.map((s) => pointAtS(rootArc, s)), tip: sync.tip.map((s) => pointAtS(tipArc, s)) };
-  const pinPts = { root: sync.pins.map((p) => pointAtS(rootArc, p.root)), tip: sync.pins.map((p) => pointAtS(tipArc, p.tip)) };
-  if (sync.root.length !== sync.tip.length) {
+  const syncT = job.sync ? syncToTransformed(job.sync, st, raw) : autoSync(root, tip, job.cornerSplitDeg);
+  const syncToJob = (x: SyncSettings) => syncToRaw(x, st, raw);
+  const rawS = (side: 'root' | 'tip', x: number) => {
+    const one = syncToRaw({ root: [x], tip: [x], pins: [] }, st, raw);
+    return one[side][0];
+  };
+  const splitPts = { root: syncT.root.map((s) => pointAtS(rootArc, s)), tip: syncT.tip.map((s) => pointAtS(tipArc, s)) };
+  const pinPts = { root: syncT.pins.map((p) => pointAtS(rootArc, p.root)), tip: syncT.pins.map((p) => pointAtS(tipArc, p.tip)) };
+  const extra = { sync: syncT, arcs: { root: rootArc, tip: tipArc }, syncToJob, rawS, splitPts, pinPts, profilePts, chord };
+  if (syncT.root.length !== syncT.tip.length) {
     return Object.assign(
       emptyResult([
-        `Root has ${sync.root.length} segments but tip has ${sync.tip.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
+        `Root has ${syncT.root.length} segments but tip has ${syncT.tip.length}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
       ]),
-      { sync, splitPts, pinPts },
+      extra,
     );
   }
-  const n = sync.root.length;
+  const n = syncT.root.length;
 
-  // 2. Resample each matched pair (and pin spans) to equal counts
-  const synced = syncStations(rootArc, tipArc, sync, job.sampling);
+  // 3. Resample each matched pair (and pin spans) to equal counts
+  const synced = syncStations(rootArc, tipArc, syncT, job.sampling);
   const stations: Station[] = synced.stations;
   warnings.push(...synced.warnings.map((message) => ({ message })));
 
@@ -143,7 +184,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     walk = walkPlan(plan, splitOffsetLoop(kerfStations, n), home);
   } catch (e) {
     const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`]);
-    Object.assign(res, { sync, splitPts, pinPts, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
+    Object.assign(res, { ...extra, stations: closeLoop(stations), kerfStations: closeLoop(kerfStations), plan });
     return res;
   }
   for (const g of walk.gaps) {
@@ -235,9 +276,7 @@ export function generateCut(rootIn: Profile, tipIn: Profile, job: JobSettings, m
     ok,
     errors,
     warnings,
-    sync,
-    splitPts,
-    pinPts,
+    ...extra,
     stations: closeLoop(stations),
     kerfStations: closeLoop(kerfStations),
     plan,
