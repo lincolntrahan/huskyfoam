@@ -334,7 +334,7 @@ export function PreviewPage(c: PageCtx) {
     <section>
       <h2>Preview cut path</h2>
       <small className="hint">
-        The 3D view shows the machine, the foam block, both profiles, the surface the wire cuts and both carriage paths. Press ▶ to play the cut (pick a
+        The 3D view shows the machine, the foam block, both profiles, the surface the wire cuts and both carriage paths (green = root side, purple = tip side). Press ▶ to play the cut (pick a
         speed on the right); drag the slider to scrub. Use the checkboxes to hide parts, and the 2D / 3D switch to go back to the flat view.
       </small>
       {r && (
