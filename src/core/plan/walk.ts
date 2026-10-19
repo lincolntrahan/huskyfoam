@@ -1,6 +1,6 @@
 import type { Station } from '../cut/kerf';
 import { dist, type Vec2 } from '../geom/vec';
-import { segEndSplit, type CutPlan, type PlanPoint, type PlanStep, type Speed } from './model';
+import { asTopology, segEndSplit, segSplits, segStartSplit, type CutPlan, type PlanPoint, type PlanStep, type Speed, type Topo } from './model';
 
 export interface FacePt {
   r: Vec2;
@@ -33,35 +33,46 @@ export interface WalkResult {
 }
 
 /**
- * The kerf-offset loop split up per segment: `corners[k]` is the corner (arc points, or a
- * single miter point) at split k, from the segment k-1 side to the segment k side;
- * `bodies[k]` are the remaining stations of segment k.
+ * The kerf-offset contours split up per segment: `corners[k]` is the corner (arc points, or a
+ * single miter point) at split k, from the side of the segment ending there to the side of
+ * the one starting there; `bodies[g]` are the remaining stations of segment g.
  */
 export interface OffsetLoop {
   corners: FacePt[][];
   bodies: FacePt[][];
 }
 
-export function splitOffsetLoop(kerfStations: Station[], n: number): OffsetLoop {
-  const corners: FacePt[][] = Array.from({ length: n }, () => []);
-  const bodies: FacePt[][] = Array.from({ length: n }, () => []);
+/**
+ * Split one contour's kerf stations (local segment numbers; an open contour's end station is
+ * numbered one past its last segment) into corners and bodies.
+ */
+export function splitOffsetLoop(kerfStations: Station[], splits: number, segs = splits): OffsetLoop {
+  const corners: FacePt[][] = Array.from({ length: splits }, () => []);
+  const bodies: FacePt[][] = Array.from({ length: segs }, () => []);
   for (const s of kerfStations) (s.corner ? corners : bodies)[s.seg].push({ r: s.r, t: s.t });
   return { corners, bodies };
+}
+
+/** Contours' offset loops joined into one, in global split / segment order. */
+export function joinOffsetLoops(loops: OffsetLoop[]): OffsetLoop {
+  return { corners: loops.flatMap((l) => l.corners), bodies: loops.flatMap((l) => l.bodies) };
 }
 
 const GAP_TOL = 1e-6;
 const same = (a: FacePt, b: FacePt) => dist(a.r, b.r) <= GAP_TOL && dist(a.t, b.t) <= GAP_TOL;
 
-export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2): WalkResult {
-  const n = loop.corners.length;
+export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2, topo?: Topo): WalkResult {
   const { corners, bodies } = loop;
+  const t = asTopology(topo ?? bodies.length);
+  const n = t.segs;
   const homePt: FacePt = { r: home, t: home };
   const segPath = (k: number, rev: boolean): FacePt[] => {
-    const p = [corners[k][corners[k].length - 1], ...bodies[k], corners[(k + 1) % n][0]];
+    const e = segSplits(t, k);
+    const p = [corners[e.start][corners[e.start].length - 1], ...bodies[k], corners[e.end][0]];
     return rev ? p.reverse() : p;
   };
   const steps = plan.steps;
-  const endsAtSplit = (s: PlanStep | undefined, k: number) => s?.kind === 'segment' && segEndSplit(s, n) === k;
+  const endsAtSplit = (s: PlanStep | undefined, k: number) => s?.kind === 'segment' && segEndSplit(s, t) === k;
 
   const resolve = (id: string, i: number, role: 'from' | 'to', cur: FacePt): FacePt => {
     const p: PlanPoint | undefined = plan.points[id];
@@ -79,7 +90,7 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2): WalkResul
         if (role === 'from') return endsAtSplit(steps[i - 1], p.split) ? cur : c[0];
         // Entering a segment from a line: attach on the far side of the corner and arc into it.
         const next = steps[i + 1];
-        if (next?.kind === 'segment' && next.reversed && (next.seg + 1) % n === p.split) return c[c.length - 1];
+        if (next?.kind === 'segment' && next.reversed && segStartSplit(next, t) === p.split) return c[c.length - 1];
         return c[0];
       }
     }
@@ -109,9 +120,9 @@ export function walkPlan(plan: CutPlan, loop: OffsetLoop, home: Vec2): WalkResul
       const body = segPath(s.seg, s.reversed);
       const prev = steps[i - 1];
       // Lead-in arc around the starting corner, unless we just came from somewhere else on the profile.
-      const cornerAtStart = s.reversed ? corners[(s.seg + 1) % n].slice().reverse() : corners[s.seg];
-      const fromAdjacent =
-        prev?.kind === 'segment' && prev.reversed === s.reversed && segEndSplit(prev, n) === (s.reversed ? (s.seg + 1) % n : s.seg);
+      const startSplit = segStartSplit(s, t);
+      const cornerAtStart = s.reversed ? corners[startSplit].slice().reverse() : corners[startSplit];
+      const fromAdjacent = prev?.kind === 'segment' && prev.reversed === s.reversed && segEndSplit(prev, t) === startSplit;
       const fromLine = !prev || prev.kind === 'line';
       if (fromAdjacent || fromLine) {
         startAt(cornerAtStart[0], i);

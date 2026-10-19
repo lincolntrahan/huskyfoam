@@ -21,6 +21,8 @@ import { STEPS, stagesUpTo, stepStates, type StepId } from './steps';
 import { usePresets } from './usePresets';
 
 const AUTOSAVE = 'huskyfoam:autosave';
+/** Contour pairing, per-contour sync and kerf sides back to automatic (when the geometry changes). */
+const noContours = (): JobSettings['contours'] => ({ pairs: null, sync: {}, kerfSide: {} });
 // three.js is big: only load it when someone opens the 3D view
 const View3D = lazy(() => import('./View3D'));
 
@@ -71,9 +73,9 @@ export function App() {
   const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units, job.selection.root) : null), [rootFile, machine.units, job.selection.root]);
   const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units, job.selection.tip) : null), [tipFile, machine.units, job.selection.tip]);
   /** Changing which entities make up a profile changes its splits, so sync and plan start over. */
-  const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, plan: null });
+  const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, contours: noContours(), plan: null });
   const result = useMemo(
-    () => (root?.profile && tip?.profile ? generateCut(root.profile, tip.profile, job, machine) : null),
+    () => (root?.contours.length && tip?.contours.length ? generateCut(root.contours, tip.contours, job, machine) : null),
     [root, tip, job, machine],
   );
   const plan: CutPlan | null = result?.plan ?? null;
@@ -82,10 +84,10 @@ export function App() {
   const importWarnings = [
     ...(root?.warnings.map((w) => `Root: ${w}`) ?? []),
     ...(tip?.warnings.map((w) => `Tip: ${w}`) ?? []),
-    ...(root && !root.profile ? ['Root: could not build a closed outline.'] : []),
-    ...(tip && !tip.profile ? ['Tip: could not build a closed outline.'] : []),
+    ...(root && !root.contours.length ? ['Root: nothing to cut (pick a closed outline).'] : []),
+    ...(tip && !tip.contours.length ? ['Tip: nothing to cut (pick a closed outline).'] : []),
   ];
-  const states = stepStates({ haveProfiles: !!(root?.profile && tip?.profile), importWarnings: importWarnings.length, result });
+  const states = stepStates({ haveProfiles: !!(root?.contours.length && tip?.contours.length), importWarnings: importWarnings.length, result });
   const goTo = (id: StepId) => {
     if (states[id].status === 'locked') return;
     setPage(id);
@@ -163,9 +165,12 @@ export function App() {
 
   // Sync edits arrive in cut space (what's on screen); store them in the job's raw form.
   const onSyncChange = (e: SyncEdit) => {
-    if (!result?.syncToJob) return;
+    const pr = result?.pairs[e.pair ?? 0];
+    if (!pr) return;
     const segmentOverrides = e.change ? remapSegmentMap(job.segmentOverrides, e.change) : job.segmentOverrides;
-    patch({ sync: result.syncToJob(e.sync), plan: e.plan, segmentOverrides });
+    // the outer contour's sync is job.sync; the others are kept per root contour
+    const where = (e.pair ?? 0) === 0 ? { sync: pr.syncToJob(e.sync) } : { contours: { ...job.contours, sync: { ...job.contours.sync, [pr.root]: pr.syncToJob(e.sync) } } };
+    patch({ ...where, plan: e.plan, segmentOverrides });
     setNotice(e.note ?? null);
   };
   const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', sCut: number) => {
@@ -189,6 +194,7 @@ export function App() {
       offset,
       block: fitBlock([...rootLoaded.pts, ...tipLoaded.pts].map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })), 0.1),
       sync: null,
+      contours: noContours(),
       plan: null,
       selection: { root: null, tip: null },
     });
@@ -198,7 +204,9 @@ export function App() {
     if (!result || !root?.profile) return;
     const block = blockOrFit();
     setSelectedStep(null);
-    patch({ block, plan: leTePlan({ splits: result.splitPts.root, block, clearance }) });
+    // LE / TE come from the outer contour's splits
+    const outer = result.splitPts.root.slice(0, result.pairs[0]?.sync.root.length ?? 0);
+    patch({ block, plan: leTePlan({ splits: outer, block, clearance }) });
   };
 
   const baseName = (rootFile?.name ?? 'cut').replace(/\.[^.]+$/, '').replace(/\s*\(example\)$/, '');
@@ -222,11 +230,11 @@ export function App() {
     tip,
     loadRoot: (f) => {
       setRootFile(f);
-      setJob((j) => ({ ...j, plan: null, sync: null, selection: { ...j.selection, root: null } }));
+      setJob((j) => ({ ...j, plan: null, sync: null, contours: noContours(), selection: { ...j.selection, root: null } }));
     },
     loadTip: (f) => {
       setTipFile(f);
-      setJob((j) => ({ ...j, plan: null, sync: null, selection: { ...j.selection, tip: null } }));
+      setJob((j) => ({ ...j, plan: null, sync: null, contours: noContours(), selection: { ...j.selection, tip: null } }));
     },
     loadExample,
     fitBlock: () => fitBlock(cutPts(), 0.1),
@@ -345,8 +353,8 @@ export function App() {
             ) : (
             <Preview2D
               mode={page}
-              root={root?.profile ?? null}
-              tip={tip?.profile ?? null}
+              root={root?.contours ?? []}
+              tip={tip?.contours ?? []}
               offset={job.offset}
               result={result}
               machine={machine}

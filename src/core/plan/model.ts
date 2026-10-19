@@ -53,22 +53,74 @@ export function newId(plan: CutPlan, prefix: string): string {
   return `${prefix}${max + 1}`;
 }
 
-/** Split where a segment step starts / ends (in loop order, n segments). */
-export function segStartSplit(s: SegmentStep, n: number): number {
-  return s.reversed ? (s.seg + 1) % n : s.seg;
+/**
+ * How splits and segments are numbered across contours. Contour c owns splits
+ * split0..split0+splits-1 and segments seg0..seg0+segs-1; segment j of a contour runs from its
+ * split j to split j+1, and on a closed contour the last one runs back to its first split.
+ */
+export interface ContourTopo {
+  closed: boolean;
+  split0: number;
+  splits: number;
+  seg0: number;
+  segs: number;
 }
-export function segEndSplit(s: SegmentStep, n: number): number {
-  return s.reversed ? s.seg : (s.seg + 1) % n;
+
+export interface Topology {
+  contours: ContourTopo[];
+  splits: number;
+  segs: number;
+}
+
+/** A plain segment count means one closed loop. */
+export type Topo = number | Topology;
+
+export function makeTopology(contours: { closed: boolean; splits: number }[]): Topology {
+  let split0 = 0;
+  let seg0 = 0;
+  const out = contours.map((c) => {
+    const segs = c.closed ? c.splits : Math.max(0, c.splits - 1);
+    const t = { closed: c.closed, split0, splits: c.splits, seg0, segs };
+    split0 += c.splits;
+    seg0 += segs;
+    return t;
+  });
+  return { contours: out, splits: split0, segs: seg0 };
+}
+
+export const asTopology = (t: Topo): Topology => (typeof t === 'number' ? makeTopology([{ closed: true, splits: t }]) : t);
+
+/** Contour index owning segment g / split k. */
+export const contourOfSeg = (t: Topology, g: number) => t.contours.findIndex((c) => g >= c.seg0 && g < c.seg0 + c.segs);
+export const contourOfSplit = (t: Topology, k: number) => t.contours.findIndex((c) => k >= c.split0 && k < c.split0 + c.splits);
+
+/** Global splits at the forward start and end of segment g. */
+export function segSplits(t: Topo, g: number): { start: number; end: number } {
+  const topo = asTopology(t);
+  const c = topo.contours[contourOfSeg(topo, g)];
+  if (!c) return { start: g, end: g + 1 };
+  const j = g - c.seg0;
+  return { start: c.split0 + j, end: c.split0 + ((j + 1) % c.splits) };
+}
+
+/** Split where a segment step starts / ends. */
+export function segStartSplit(s: SegmentStep, t: Topo): number {
+  const e = segSplits(t, s.seg);
+  return s.reversed ? e.end : e.start;
+}
+export function segEndSplit(s: SegmentStep, t: Topo): number {
+  const e = segSplits(t, s.seg);
+  return s.reversed ? e.start : e.end;
 }
 
 /** Point id a step starts / ends at, creating the split point entry if needed. */
-export function stepStartRef(plan: CutPlan, step: PlanStep, n: number): string {
+export function stepStartRef(plan: CutPlan, step: PlanStep, t: Topo): string {
   if (step.kind === 'line') return step.from;
-  return ensureSplit(plan, segStartSplit(step, n));
+  return ensureSplit(plan, segStartSplit(step, t));
 }
-export function stepEndRef(plan: CutPlan, step: PlanStep, n: number): string {
+export function stepEndRef(plan: CutPlan, step: PlanStep, t: Topo): string {
   if (step.kind === 'line') return step.to;
-  return ensureSplit(plan, segEndSplit(step, n));
+  return ensureSplit(plan, segEndSplit(step, t));
 }
 
 /** Mutates plan.points to make sure split k has an entry; returns its id. */

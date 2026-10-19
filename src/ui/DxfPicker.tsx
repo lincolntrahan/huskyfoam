@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Vec2 } from '../core/geom/vec';
 import type { LoadedProfile } from '../core/io/loadProfile';
+import { contourSummary } from './pages';
 
 interface Box {
   x: number;
@@ -105,10 +106,10 @@ export function DxfPicker(props: {
           <b>{props.label}</b> · {nIn} of {loaded.edges.length} entities in use
           {loaded.texts.length ? ` · ${loaded.texts.length} text (never cut)` : ''}
           {' · '}
-          {loaded.profile ? <span className="ok-text">closed outline ✓</span> : <span className="err-text">no closed outline</span>}
+          {loaded.profile ? <span className="ok-text">{contourSummary(loaded).toLowerCase()} ✓</span> : <span className="err-text">nothing to cut</span>}
         </span>
         <span className="row-buttons" style={{ margin: 0 }}>
-          <button className={props.selection === null ? 'active' : ''} onClick={() => props.onChange(null)} title="Largest closed outline; text and stray geometry left out">
+          <button className={props.selection === null ? 'active' : ''} onClick={() => props.onChange(null)} title="Largest closed outline and everything inside it; text and stray geometry left out">
             Auto pick
           </button>
           <button onClick={() => set(new Set(loaded.edges.map((_, i) => i)))}>Include all</button>

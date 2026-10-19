@@ -24,8 +24,22 @@ On **Import Geometry** each file is drawn with all of its entities:
 - **Drag a box** to include everything inside it; **Shift-drag** excludes.
 - **Right-drag** pans, the wheel zooms, and double-click fits.
 - Text (title blocks, *SOLIDWORKS Educational* watermarks) is shown in grey and never cut.
-- *Auto pick* (the default) uses the largest closed outline.
+- *Auto pick* (the default) uses the largest closed outline plus every contour inside it (spar holes, slot lines).
 - The status line says whether your selection forms a closed outline.
+
+### Several contours: spar holes and open cuts
+
+A profile can have more than one contour: the closed outer outline plus holes (spar channels) and open lines. Pick them on Import like any other geometry.
+
+- **Pairing**: each root contour is cut with a tip contour. They're paired by where they sit in the outline, and you can change a pairing in the **Contours** table on *Segment Profiles* (or set a contour to *not cut*).
+- **Sync**: every contour has its own splits and pins, edited on the canvas as usual. Split numbers run on from one contour to the next.
+  - A closed contour's first split is its start; click a split and choose *Make contour start* to move it.
+  - An open contour has a fixed split at each end.
+- **Default plan**: the outline gets an extra split at the point nearest each other contour. The cut leaves the outline there, goes round the hole (or along the open line and back), and returns to the same split before carrying on round the outline. Edit it on *Sequence Cuts* like any plan.
+- **Kerf side**, per contour, in the Contours table:
+  - Closed contours: outside or inside. *Auto* is outside for the outline and inside for holes.
+  - Open contours: left or right of the direction they were drawn in. *Auto* is none, so the wire runs on the line.
+  - Turn on the kerf layer to check which side was used.
 
 ### Block position (Define Setup)
 

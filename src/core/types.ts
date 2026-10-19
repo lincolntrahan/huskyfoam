@@ -2,6 +2,7 @@ import type { Vec2 } from './geom/vec';
 import type { CutPlan } from './plan/model';
 import type { SyncSettings } from './sync/sync';
 import type { Transforms } from './cut/transform';
+import type { KerfSide } from './cut/contours';
 
 export type Units = 'in' | 'mm';
 
@@ -125,6 +126,18 @@ export interface JobSettings {
   transforms: Transforms;
   /** Split and pin positions on the raw outlines; null = automatic (entity boundaries + sharp corners). */
   sync: SyncSettings | null;
+  /**
+   * Profiles with several contours (spar holes, open cuts). Contour 0 is the outer one; its
+   * sync is `sync` above. Everything here is keyed by root contour index.
+   */
+  contours: {
+    /** Tip contour each root contour is cut with (-1 = not cut); null = automatic by position. */
+    pairs: number[] | null;
+    /** Sync of the other pairs, on the raw contours; missing = automatic. */
+    sync: Record<number, SyncSettings>;
+    /** Kerf side per pair; missing = automatic. */
+    kerfSide: Record<number, KerfSide>;
+  };
   /** Cut plan; null = the default Loop template for however many segments the profiles have. */
   plan: CutPlan | null;
 }

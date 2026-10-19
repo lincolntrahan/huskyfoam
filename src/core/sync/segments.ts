@@ -1,4 +1,4 @@
-import type { Profile } from '../geom/profile';
+import { isClosed, type Profile } from '../geom/profile';
 import { cross, dot, sub, type Vec2 } from '../geom/vec';
 
 /** Turning angle (radians, + = left) at dense vertex i of a closed polyline. */
@@ -9,11 +9,16 @@ export function turnAngle(pts: Vec2[], i: number): number {
   return Math.atan2(cross(a, b), dot(a, b));
 }
 
-/** Default split points: every entity boundary plus every corner sharper than cornerDeg. */
+/**
+ * Default split points: every entity boundary plus every corner sharper than cornerDeg.
+ * An open contour always has a split at each end.
+ */
 export function autoSplits(profile: Profile, cornerDeg: number): number[] {
-  const set = new Set(profile.breaks);
+  const closed = isClosed(profile);
+  const last = profile.pts.length - 1;
+  const set = new Set(closed ? profile.breaks : [0, ...profile.breaks, last]);
   const lim = (cornerDeg * Math.PI) / 180;
-  for (let i = 0; i < profile.pts.length; i++) {
+  for (let i = closed ? 0 : 1; i < (closed ? profile.pts.length : last); i++) {
     if (Math.abs(turnAngle(profile.pts, i)) > lim) set.add(i);
   }
   return [...set].sort((a, b) => a - b);

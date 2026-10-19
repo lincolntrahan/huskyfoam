@@ -1,26 +1,33 @@
-import type { Profile } from './profile';
+import { isClosed, type Profile } from './profile';
 import { dist, distToSegment, dot, lerp, sub, type Vec2 } from './vec';
 
 /**
- * Arc-length view of a closed profile: positions are distances along the loop from pts[0],
- * in [0, length). Lets splits and pins sit anywhere, not only on dense vertices.
+ * Arc-length view of a profile contour: positions are distances along it from pts[0], in
+ * [0, length) on a closed loop and [0, length] on an open contour. Lets splits and pins sit
+ * anywhere, not only on dense vertices.
  */
 export interface ArcLoop {
-  /** Dense points with the closing point repeated at the end. */
+  /** Dense points; a closed loop repeats its first point at the end. */
   pts: Vec2[];
   /** cum[i] = arc length at pts[i]; cum[last] = total length. */
   cum: number[];
   length: number;
+  /** False for an open contour: positions don't wrap. Absent = closed. */
+  closed?: boolean;
 }
 
 export function arcLoop(profile: Profile): ArcLoop {
-  const pts = [...profile.pts, profile.pts[0]];
+  const closed = isClosed(profile);
+  const pts = closed ? [...profile.pts, profile.pts[0]] : profile.pts.slice();
   const cum = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + dist(pts[i - 1], pts[i]));
-  return { pts, cum, length: cum[cum.length - 1] };
+  return closed ? { pts, cum, length: cum[cum.length - 1] } : { pts, cum, length: cum[cum.length - 1], closed: false };
 }
 
-export const wrapS = (a: ArcLoop, s: number) => ((s % a.length) + a.length) % a.length;
+export const arcClosed = (a: ArcLoop) => a.closed !== false;
+
+/** Wrap a position onto a closed loop; clamp it onto an open contour. */
+export const wrapS = (a: ArcLoop, s: number) => (arcClosed(a) ? ((s % a.length) + a.length) % a.length : Math.min(Math.max(s, 0), a.length));
 
 /** Arc length at dense vertex i. */
 export const sAtIndex = (a: ArcLoop, i: number) => a.cum[i];
@@ -53,14 +60,16 @@ export function nearestS(a: ArcLoop, p: Vec2): { s: number; d: number } {
   return best;
 }
 
-/** Forward (CCW) distance from sA to sB, in (0, length]. */
+/** Forward (CCW) distance from sA to sB, in (0, length] (open contours: sB - sA, never wrapping). */
 export function spanS(a: ArcLoop, sA: number, sB: number): number {
+  if (!arcClosed(a)) return Math.max(0, sB - sA);
   const d = wrapS(a, sB - sA);
   return d === 0 ? a.length : d;
 }
 
 /** True if s lies strictly inside the forward stretch from sA to sB. */
 export function withinS(a: ArcLoop, sA: number, sB: number, s: number): boolean {
+  if (!arcClosed(a)) return s > sA && s < sB;
   const d = wrapS(a, s - sA);
   return d > 0 && d < spanS(a, sA, sB);
 }
@@ -71,6 +80,11 @@ export function withinS(a: ArcLoop, sA: number, sB: number, s: number): boolean 
  */
 export function sliceS(a: ArcLoop, sA: number, sB: number): Vec2[] {
   const out = [pointAtS(a, sA)];
+  if (!arcClosed(a)) {
+    for (let i = 0; i < a.pts.length; i++) if (a.cum[i] > sA && a.cum[i] < sB) out.push(a.pts[i]);
+    out.push(pointAtS(a, sB));
+    return out;
+  }
   const total = spanS(a, sA, sB);
   const start = wrapS(a, sA);
   const n = a.pts.length - 1; // unique vertices
