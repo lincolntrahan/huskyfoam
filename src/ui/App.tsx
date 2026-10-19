@@ -7,7 +7,10 @@ import { loadDxfProfile } from '../core/io/loadProfile';
 import { makeProject, parseProject, type SourceFile } from '../core/io/project';
 import type { CutPlan } from '../core/plan/model';
 import { remapSegmentMap } from '../core/plan/remap';
-import { leTePlan, type Rect } from '../core/plan/templates';
+import { type Rect } from '../core/plan/templates';
+import { clonePlan, emptyPlan, HOME, stepEndRef, type PlanPoint } from '../core/plan/model';
+import { applyPairTemplate, insertCutPath, insertJog, insertSegment, sequenceAll, type PairTemplate } from '../core/plan/tree';
+import type { Pick } from './PlanPanel';
 import { defaultJob } from '../core/presets';
 import type { SyncEdit } from '../core/sync/edit';
 import type { JobSettings, MaterialPreset } from '../core/types';
@@ -45,7 +48,9 @@ export function App() {
   const material = presets.materials.find((m) => m.id === materialId) ?? presets.materials[0];
   const [editor, setEditor] = useState<'machine' | 'material' | null>(null);
 
-  const [job, setJob] = useState<JobSettings>(() => defaultJob(machine, material));
+  /** A new job: the defaults, with nothing sequenced yet. */
+  const newJob = () => ({ ...defaultJob(machine, material), plan: emptyPlan() });
+  const [job, setJob] = useState<JobSettings>(newJob);
   const [rootFile, setRootFile] = useState<SourceFile | null>(null);
   const [tipFile, setTipFile] = useState<SourceFile | null>(null);
   const [page, setPage] = useState<StepId>('import');
@@ -55,6 +60,11 @@ export function App() {
   const [clearance, setClearance] = useState(0.5);
   const [outBack, setOutBack] = useState(1);
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
+  /** Sequence Cuts: the pair the template buttons apply to, what an insert button is waiting for, and the rollback bar. */
+  const [selectedPair, setSelectedPair] = useState<number | null>(null);
+  const [pick, setPick] = useState<Pick>(null);
+  /** Id of the first rolled-back (hidden) step; null = the bar is at the bottom. */
+  const [barId, setBarId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
@@ -80,10 +90,10 @@ export function App() {
     [tipFile, machine.units, job.selection.tip, job.rotation.tip],
   );
   /** Changing which entities make up a profile changes its splits, so sync and plan start over. */
-  const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, contours: noContours(), plan: null });
+  const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, contours: noContours(), plan: emptyPlan() });
   /** Rotating a profile changes where its splits fall, so sync and plan start over too. */
   const setRotation = (side: 'root' | 'tip', deg: number) =>
-    patch({ rotation: { ...job.rotation, [side]: ((deg % 360) + 360) % 360 }, sync: null, contours: noContours(), plan: null });
+    patch({ rotation: { ...job.rotation, [side]: ((deg % 360) + 360) % 360 }, sync: null, contours: noContours(), plan: emptyPlan() });
   // While a profile is being dragged the part offset is held, so it doesn't jump under the cursor.
   const [hold, setHold] = useState<Vec2 | null>(null);
   const dragStart = useRef<Vec2 | null>(null);
@@ -112,6 +122,59 @@ export function App() {
     }
   };
   const plan: CutPlan | null = result?.plan ?? null;
+  const steps = plan?.steps ?? [];
+  const barIndex = barId ? (steps.findIndex((s) => s.id === barId) + 1 || steps.length + 1) - 1 : steps.length;
+  const setBar = (i: number) => setBarId(i < steps.length ? steps[i].id : null);
+  /** Where inserted steps go: at the bar, but before the closing jog home when the bar is at the bottom. */
+  const lastStep = steps[steps.length - 1];
+  const insertIndex = barIndex >= steps.length && lastStep?.kind === 'jog' && lastStep.to === HOME && !lastStep.group ? steps.length - 1 : barIndex;
+  /** What the canvas and 3D view show: the cut up to the rollback bar. */
+  const visible = useMemo(() => {
+    if (!result || barIndex >= (result.plan?.steps.length ?? 0)) return result;
+    return { ...result, path: result.path.filter((p) => p.step < barIndex), moves: result.moves.filter((m) => (m.step ?? 0) < barIndex), gaps: result.gaps.filter((g) => g.before < barIndex) };
+  }, [result, barIndex]);
+  const topoOf = () => result?.topology ?? result?.stats.segments ?? 0;
+  const planNow = () => job.plan ?? plan ?? emptyPlan();
+  /** LE→TE template input: the outline's splits, the block and the template clearance. */
+  const leTeInput = () => (result ? { splits: result.splitPts.root.slice(0, result.pairs[0]?.sync.root.length ?? 0), block: blockOrFit(), clearance } : undefined);
+  const applyTemplate = (t: PairTemplate) => {
+    if (selectedPair === null || !result) return;
+    patch({ plan: applyPairTemplate(job.plan, topoOf(), selectedPair, t, barIndex, leTeInput()) });
+    setSelectedStep(null);
+  };
+  const doSequenceAll = () => {
+    if (!result) return;
+    // holes front to back (by their start split's X on the root face)
+    const order = result.pairs
+      .map((pr, i) => ({ i, x: result.splitPts.root[pr.split0]?.x ?? 0 }))
+      .filter((p) => p.i > 0)
+      .sort((a, b) => a.x - b.x)
+      .map((p) => p.i);
+    patch({ plan: sequenceAll(topoOf(), order) });
+    setBarId(null);
+    setSelectedStep(null);
+  };
+  /** Insert-at-the-bar picks from the canvas. */
+  const onPickSplit = (k: number) => {
+    patch({ plan: insertJog(planNow(), insertIndex, { split: k }) });
+    setPick(null);
+  };
+  const onPickSegment = (seg: number, reversed: boolean) => {
+    patch({ plan: insertSegment(planNow(), insertIndex, seg, reversed) });
+    setPick(null);
+  };
+  const onPickLine = (through: PlanPoint[], endSplit: number | null) => {
+    const p = clonePlan(planNow());
+    const prevStep = p.steps[insertIndex - 1];
+    const from = prevStep ? stepEndRef(p, prevStep, topoOf()) : HOME;
+    patch({ plan: insertCutPath(p, insertIndex, from, through, endSplit) });
+    setPick(null);
+  };
+  /** Where the wire is at the bar (root face), for drawing a new cut line from. */
+  const pickStart = (() => {
+    const before = result?.path.filter((p) => p.step < insertIndex) ?? [];
+    return before.length ? before[before.length - 1].r : machine.home;
+  })();
   /** For each contour of a side, the pair it is cut in (-1 = not cut). */
   const pairOf = (side: 'root' | 'tip', n: number) => Array.from({ length: n }, (_, c) => result?.pairs.findIndex((p) => p[side] === c) ?? (c === 0 ? 0 : -1));
 
@@ -184,7 +247,7 @@ export function App() {
     }
     setRootFile(null);
     setTipFile(null);
-    setJob(defaultJob(machine, material));
+    setJob(newJob());
     setNotice(null);
     goTo('import');
   };
@@ -205,7 +268,8 @@ export function App() {
     const segmentOverrides = e.change ? remapSegmentMap(job.segmentOverrides, e.change) : job.segmentOverrides;
     // the outer contour's sync is job.sync; the others are kept per root contour
     const where = (e.pair ?? 0) === 0 ? { sync: pr.syncToJob(e.sync) } : { contours: { ...job.contours, sync: { ...job.contours.sync, [pr.root]: pr.syncToJob(e.sync) } } };
-    patch({ ...where, plan: e.plan, segmentOverrides });
+    // a new-style plan that couldn't follow the edit starts over (an old-style one falls back to the old default)
+    patch({ ...where, plan: e.plan === null && job.plan !== null ? emptyPlan() : e.plan, segmentOverrides });
     setNotice(e.note ?? null);
   };
   const onChordPick = (side: 'root' | 'tip', end: 'le' | 'te', sCut: number) => {
@@ -229,18 +293,9 @@ export function App() {
       kerf: { mode: 'fixed', root: 0.0998, tip: 0.1116 },
       sync: null,
       contours: noContours(),
-      plan: null,
+      plan: emptyPlan(),
       selection: { root: null, tip: null },
     });
-  };
-
-  const applyLeTe = () => {
-    if (!result || !root?.profile) return;
-    const block = blockOrFit();
-    setSelectedStep(null);
-    // LE / TE come from the outer contour's splits
-    const outer = result.splitPts.root.slice(0, result.pairs[0]?.sync.root.length ?? 0);
-    patch({ plan: leTePlan({ splits: outer, block, clearance }) });
   };
 
   const baseName = (rootFile?.name ?? 'cut').replace(/\.[^.]+$/, '').replace(/\s*\(example\)$/, '');
@@ -266,11 +321,11 @@ export function App() {
     tip,
     loadRoot: (f) => {
       setRootFile(f);
-      setJob((j) => ({ ...j, plan: null, sync: null, contours: noContours(), selection: { ...j.selection, root: null } }));
+      setJob((j) => ({ ...j, plan: emptyPlan(), sync: null, contours: noContours(), selection: { ...j.selection, root: null } }));
     },
     loadTip: (f) => {
       setTipFile(f);
-      setJob((j) => ({ ...j, plan: null, sync: null, contours: noContours(), selection: { ...j.selection, tip: null } }));
+      setJob((j) => ({ ...j, plan: emptyPlan(), sync: null, contours: noContours(), selection: { ...j.selection, tip: null } }));
     },
     loadExample,
     fitBlock: () => fitBlock(cutPts(), 0.1),
@@ -280,7 +335,20 @@ export function App() {
     setOutBack,
     selectedStep,
     setSelectedStep,
-    applyLeTe,
+    selectedPair,
+    setSelectedPair,
+    applyTemplate,
+    sequenceAll: doSequenceAll,
+    clearSequence: () => {
+      patch({ plan: emptyPlan() });
+      setBarId(null);
+      setSelectedStep(null);
+    },
+    bar: barIndex,
+    setBar,
+    pick,
+    setPick,
+    jogHome: () => patch({ plan: insertJog(planNow(), insertIndex, 'home') }),
     baseName,
     setNotice,
     resetProject: () => {
@@ -371,7 +439,7 @@ export function App() {
             )}
             {view3d && page !== 'import' ? (
               <Suspense fallback={<div className="canvas-wrap"><div className="empty">Loading 3D view…</div></div>}>
-                <View3D result={result} job={placed} machine={machine} mode={page} />
+                <View3D result={visible} job={placed} machine={machine} mode={page} />
               </Suspense>
             ) : page === 'import' ? (
               <div className="pickers">
@@ -410,11 +478,19 @@ export function App() {
               root={root?.contours ?? []}
               tip={tip?.contours ?? []}
               offset={placed.offset}
-              result={result}
+              result={visible}
               machine={machine}
               layers={layers}
               block={placed.block}
               onProfileDrag={onProfileDrag}
+              selectedPair={selectedPair}
+              onSelectPair={setSelectedPair}
+              pick={pick}
+              pickStart={pickStart}
+              onPickSplit={onPickSplit}
+              onPickSegment={onPickSegment}
+              onPickLine={onPickLine}
+              onCancelPick={() => setPick(null)}
               plan={plan}
               onPlanChange={(p) => patch({ plan: p })}
               outBackDistance={outBack}

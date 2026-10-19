@@ -58,6 +58,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     sync: job.sync ?? null,
     contours: { ...d.contours, ...(job.contours ?? {}) },
     plan: job.plan ?? null,
+    jogClearance: job.jogClearance ?? d.jogClearance,
   };
   delete (out as unknown as Record<string, unknown>).segmentKerf;
   if (job.layout === undefined) {

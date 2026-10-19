@@ -8,7 +8,9 @@ import type { CutPlan, PlanPoint } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
 import { addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
-import { isLinked } from '../core/sync/sync';
+import { isLinked, locate } from '../core/sync/sync';
+import { pairColor } from './DxfPicker';
+import type { Pick } from './PlanPanel';
 import type { MachinePreset } from '../core/types';
 import type { StepId } from './steps';
 
@@ -49,6 +51,17 @@ interface Props {
   onChordPick: (side: Side, end: 'le' | 'te', s: number) => void;
   /** Arrange Profiles: a profile is being dragged by `delta` (world units) from where it was grabbed. */
   onProfileDrag?: (side: Side, phase: 'start' | 'move' | 'end', delta: Vec2) => void;
+  /** Sequence Cuts: the pair the templates apply to (click a contour to pick it). */
+  selectedPair?: number | null;
+  onSelectPair?: (p: number | null) => void;
+  /** Sequence Cuts: an insert button is waiting for a split, a segment, or a drawn cut line. */
+  pick?: Pick;
+  /** Where the wire is at the rollback bar (root face): a new cut line starts here. */
+  pickStart?: Vec2;
+  onPickSplit?: (k: number) => void;
+  onPickSegment?: (seg: number, reversed: boolean) => void;
+  onPickLine?: (through: PlanPoint[], endSplit: number | null) => void;
+  onCancelPick?: () => void;
 }
 
 interface Box {
@@ -65,7 +78,10 @@ type Menu =
   | { kind: 'pin'; i: number; side: Side; sx: number; sy: number };
 
 interface Drawing {
+  /** Split the run-out leaves from; -1 when drawing a cut line inserted at the rollback bar. */
   fromSplit: number;
+  /** Start of a cut line drawn at the bar (where the wire is there). */
+  start?: Vec2;
   pts: Vec2[];
   cursor: Vec2 | null;
 }
@@ -231,14 +247,24 @@ export function Preview2D(props: Props) {
       if (last?.kind === 'free' && Math.hypot(last.p.x - p.x, last.p.y - p.y) < 1e-9) continue;
       free.push({ kind: 'free', p });
     }
-    if (free.length || endSplit !== null) onPlanChange(insertRunOut(plan, drawing.fromSplit, free, endSplit, topo));
+    if (drawing.start) {
+      if (free.length || endSplit !== null) props.onPickLine?.(free, endSplit);
+      else props.onCancelPick?.();
+    } else if (free.length || endSplit !== null) onPlanChange(insertRunOut(plan, drawing.fromSplit, free, endSplit, topo));
     setDrawing(null);
   };
+  // "+ Cut line" draws from where the wire is at the rollback bar
+  useEffect(() => {
+    if (props.pick === 'line') setDrawing({ fromSplit: -1, start: props.pickStart ?? { x: 0, y: 0 }, pts: [], cursor: null });
+    else setDrawing((d) => (d?.start ? null : d));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.pick]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setDrawing(null);
         setMenu(null);
+        props.onCancelPick?.();
       } else if (e.key === 'Enter' && drawing) finishDrawing(null);
     };
     window.addEventListener('keydown', onKey);
@@ -355,6 +381,22 @@ export function Preview2D(props: Props) {
     );
   };
 
+  /** Sequence Cuts: a click on a contour picks its pair, selects the step cutting that segment, or adds the segment. */
+  const planOutlineClick = (side: Side, pair: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const pr = pairs[pair];
+    if (!pr || !plan) return;
+    const at = locate(pr.arcs[side], pr.sync[side], sOnProfile(side, toWorld(e.clientX, e.clientY), pair));
+    const seg = at ? pr.seg0 + at.k : null;
+    if (props.pick === 'segment') {
+      if (seg !== null) props.onPickSegment?.(seg, false);
+      return;
+    }
+    props.onSelectPair?.(pair);
+    const step = seg === null ? -1 : plan.steps.findIndex((s) => s.kind === 'segment' && s.seg === seg);
+    props.onSelectStep(step >= 0 ? step : null);
+  };
+
   const profileClick = (side: Side, pair: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!pairs[pair]) return;
@@ -362,6 +404,8 @@ export function Preview2D(props: Props) {
   };
 
 
+  // Sequence Cuts draws each contour pair in its pair colour
+  const byPair = props.mode === 'sequence';
   const edit = {
     sync: props.mode === 'segment',
     chord: props.mode === 'transform',
@@ -465,7 +509,8 @@ export function Preview2D(props: Props) {
         })
       : [];
 
-  const lastDrawPt = drawing ? (drawing.pts[drawing.pts.length - 1] ?? splitPos('root', drawing.fromSplit)) : null;
+  const drawStart = drawing ? (drawing.start ?? splitPos('root', drawing.fromSplit)) : null;
+  const lastDrawPt = drawing ? (drawing.pts[drawing.pts.length - 1] ?? drawStart) : null;
 
   const [tx0, tx1] = machine.travel.x;
   const [ty0, ty1] = machine.travel.y;
@@ -543,7 +588,8 @@ export function Preview2D(props: Props) {
           if (sd) {
             syncDrag.current = null;
             if (sd.moved) return;
-            if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
+            if (sd.kind === 'split' && props.pick === 'jog') props.onPickSplit?.(sd.i);
+            else if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
             else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
             else setMenu({ kind: 'pin', i: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
             return;
@@ -566,6 +612,13 @@ export function Preview2D(props: Props) {
         }}
       >
         <defs>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation={unit * 0.35} result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
           {(['cut', 'jog'] as const).map((s) => (
             <marker key={s} id={`arrow-${s}`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth={unit * 0.5} markerHeight={unit * 0.5} orient="auto" markerUnits="userSpaceOnUse">
               <path d="M0,0 L10,5 L0,10 z" fill={speedColor(s)} />
@@ -585,8 +638,16 @@ export function Preview2D(props: Props) {
           )}
           {layers.profiles && (
             <>
-              {showR && outlines.root.map((o, i) => <Outline key={`r${i}`} pts={o.pts} closed={o.closed} stroke="var(--root)" strokeWidth={1.5} />)}
-              {showT && outlines.tip.map((o, i) => <Outline key={`t${i}`} pts={o.pts} closed={o.closed} stroke="var(--tip)" strokeWidth={1.5} />)}
+              {showR &&
+                outlines.root.map((o, i) => (
+                  <Outline key={`r${i}`} pts={o.pts} closed={o.closed} stroke={byPair ? pairColor(o.pair, 'var(--root)') : 'var(--root)'} strokeWidth={byPair && o.pair === props.selectedPair ? 3.5 : 1.5} />
+                ))}
+              {showT &&
+                outlines.tip.map((o, i) => (
+                  <g key={`t${i}`} opacity={byPair ? 0.55 : 1}>
+                    <Outline pts={o.pts} closed={o.closed} stroke={byPair ? pairColor(o.pair, 'var(--tip)') : 'var(--tip)'} strokeWidth={byPair && o.pair === props.selectedPair ? 3.5 : 1.5} />
+                  </g>
+                ))}
             </>
           )}
           {layers.kerf &&
@@ -598,12 +659,32 @@ export function Preview2D(props: Props) {
                 </g>
               ) : null,
             )}
+          {/* Sequence Cuts: click a contour to pick its pair (or, adding a segment, the segment); below the cut paths */}
+          {edit.plan && layers.profiles && !drawing &&
+            (['root', 'tip'] as Side[]).map((side) =>
+              (side === 'root' ? showR : showT)
+                ? pairs.map((pr, i) => (
+                    <Outline
+                      key={`seqhit-${side}-${i}`}
+                      className="clickable"
+                      pts={pr.pts[side]}
+                      closed={pr.closed}
+                      stroke="transparent"
+                      strokeWidth={12}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => planOutlineClick(side, i, e)}
+                      title={props.pick === 'segment' ? 'Click to add this segment' : `Pair ${i + 1}: click to pick it for a template`}
+                    />
+                  ))
+                : null,
+            )}
           {layers.plan &&
             runs.map((run, i) => {
               const color = speedColor(run.speed);
               const sel = props.selectedStep === run.step;
+              const dimmed = props.selectedStep !== null && !sel;
               const dash = run.speed === 'cut' ? undefined : '6 4';
-              const width = sel ? 3.5 : 2;
+              const width = sel ? 5 : 2;
               const main = showR ? run.r : run.t;
               const mid = Math.floor((main.length - 1) / 2);
               const arrow = run.speed === 'gap' ? undefined : `url(#arrow-${run.speed})`;
@@ -614,8 +695,9 @@ export function Preview2D(props: Props) {
                 if (run.line && run.step >= 0) setMenu({ kind: 'line', step: run.step, at: toWorld(e.clientX, e.clientY), ...toWrap(e.clientX, e.clientY) });
               };
               return (
-                <g key={i}>
+                <g key={i} opacity={dimmed ? 0.22 : 1} filter={sel ? 'url(#glow)' : undefined}>
                   {showR && showT && <polyline points={pts(run.t)} stroke={color} strokeWidth={width * 0.6} strokeDasharray={dash} opacity={0.55} vectorEffect="non-scaling-stroke" />}
+                  {sel && <polyline points={pts(main)} stroke="#ffffff" strokeWidth={width + 4} opacity={0.35} vectorEffect="non-scaling-stroke" />}
                   <polyline points={pts(main)} stroke={color} strokeWidth={width} strokeDasharray={dash} vectorEffect="non-scaling-stroke" />
                   {arrow && main.length >= 2 && <polyline points={pts([main[mid], main[mid + 1]])} stroke="none" markerEnd={arrow} />}
                   {showR && <polyline className="clickable" points={pts(run.r)} stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke" onPointerDown={(e) => e.stopPropagation()} onClick={clickLine} />}
@@ -625,7 +707,7 @@ export function Preview2D(props: Props) {
             })}
           {drawing && lastDrawPt && (
             <polyline
-              points={pts([splitPos('root', drawing.fromSplit)!, ...drawing.pts, ...(drawing.cursor ? [drawing.cursor] : [])])}
+              points={pts([drawStart!, ...drawing.pts, ...(drawing.cursor ? [drawing.cursor] : [])])}
               stroke="var(--cut)"
               strokeDasharray="3 3"
               strokeWidth={1.5}
@@ -687,10 +769,13 @@ export function Preview2D(props: Props) {
 
       {drawing && (
         <div className="banner">
-          Drawing a run-out from split {drawing.fromSplit + 1}: click to add points, click a split marker to run back in, Enter or double-click to stop
-          here, Esc to cancel.
+          {drawing.start
+            ? 'Drawing a cut line from where the wire is at the rollback bar: click to add points, click a split marker to end there, Enter or double-click to stop, Esc to cancel.'
+            : `Drawing a run-out from split ${drawing.fromSplit + 1}: click to add points, click a split marker to run back in, Enter or double-click to stop here, Esc to cancel.`}
         </div>
       )}
+      {props.pick === 'jog' && <div className="banner">Click a split marker to jog to it (over the block). Esc to cancel.</div>}
+      {props.pick === 'segment' && <div className="banner">Click a profile segment to add it, forward. Esc to cancel.</div>}
 
       {menu && plan && (
         <div className="popover" style={{ left: menu.sx, top: menu.sy }} onPointerDown={(e) => e.stopPropagation()}>

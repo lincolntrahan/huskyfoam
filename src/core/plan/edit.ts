@@ -32,12 +32,12 @@ export function removeStep(plan: CutPlan, i: number): CutPlan {
   return custom(p);
 }
 
-/** Reverse a segment, or swap the ends of a line. */
+/** Reverse a segment, or swap the ends of a line (a jog has no fixed start, so it stays). */
 export function reverseStep(plan: CutPlan, i: number): CutPlan {
   const p = clonePlan(plan);
   const s = p.steps[i];
   if (s.kind === 'segment') s.reversed = !s.reversed;
-  else [s.from, s.to] = [s.to, s.from];
+  else if (s.kind === 'line') [s.from, s.to] = [s.to, s.from];
   return custom(p);
 }
 

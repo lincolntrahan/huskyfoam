@@ -11,11 +11,11 @@ function renameSplits(plan: CutPlan, mapSplit: (k: number) => number | null): Cu
   const rename = new Map<string, string>();
   const points: Record<string, PlanPoint> = {};
   for (const [id, p] of Object.entries(plan.points)) {
-    if (p.kind === 'level') {
+    if (p.kind === 'level' || p.kind === 'above') {
       // keeps its id; only the split it levels with is renumbered
       const k = mapSplit(p.split);
       if (k === null) {
-        if (plan.steps.some((s) => s.kind === 'line' && (s.from === id || s.to === id))) return null;
+        if (plan.steps.some((s) => (s.kind === 'line' && (s.from === id || s.to === id)) || (s.kind === 'jog' && s.to === id))) return null;
         continue;
       }
       points[id] = { ...p, split: k };
@@ -27,7 +27,7 @@ function renameSplits(plan: CutPlan, mapSplit: (k: number) => number | null): Cu
     }
     const k = mapSplit(p.split);
     if (k === null) {
-      const used = plan.steps.some((s) => s.kind === 'line' && (s.from === id || s.to === id));
+      const used = plan.steps.some((s) => (s.kind === 'line' && (s.from === id || s.to === id)) || (s.kind === 'jog' && s.to === id));
       if (used) return null;
       continue;
     }
@@ -35,7 +35,11 @@ function renameSplits(plan: CutPlan, mapSplit: (k: number) => number | null): Cu
     points[splitId(k)] = { kind: 'split', split: k };
   }
   const steps = plan.steps.map((s): PlanStep =>
-    s.kind === 'line' ? { ...s, from: rename.get(s.from) ?? s.from, to: rename.get(s.to) ?? s.to } : s,
+    s.kind === 'line'
+      ? { ...s, from: rename.get(s.from) ?? s.from, to: rename.get(s.to) ?? s.to }
+      : s.kind === 'jog'
+        ? { ...s, to: rename.get(s.to) ?? s.to }
+        : s,
   );
   return { ...plan, points, steps };
 }

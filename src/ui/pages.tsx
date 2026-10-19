@@ -2,13 +2,15 @@ import type { CutResult } from '../core/cut/pipeline';
 import type { LoadedProfile } from '../core/io/loadProfile';
 import type { SourceFile } from '../core/io/project';
 import type { CutPlan } from '../core/plan/model';
-import { loopPlan, type Rect } from '../core/plan/templates';
+import type { Rect } from '../core/plan/templates';
 import type { JobSettings, MachinePreset, MaterialPreset, SegmentOverride } from '../core/types';
 import type { KerfSide } from '../core/cut/contours';
 import { defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
 import { pairColor } from './DxfPicker';
 import { NumberField, SelectField } from './Fields';
-import { PlanPanel } from './PlanPanel';
+import { PlanPanel, type Pick } from './PlanPanel';
+import type { PairTemplate } from '../core/plan/tree';
+import { emptyPlan } from '../core/plan/model';
 import { download } from './PresetEditor';
 import { TransformPanel } from './TransformPanel';
 import type { PresetOrigin } from './usePresets';
@@ -45,7 +47,17 @@ export interface PageCtx {
   setOutBack: (v: number) => void;
   selectedStep: number | null;
   setSelectedStep: (i: number | null) => void;
-  applyLeTe: () => void;
+  selectedPair: number | null;
+  setSelectedPair: (p: number | null) => void;
+  applyTemplate: (t: PairTemplate) => void;
+  sequenceAll: () => void;
+  clearSequence: () => void;
+  /** Rollback bar: steps from this index on are hidden; new steps go here. */
+  bar: number;
+  setBar: (i: number) => void;
+  pick: Pick;
+  setPick: (p: Pick) => void;
+  jogHome: () => void;
   baseName: string;
   setNotice: (s: string | null) => void;
   /** Clear profiles and all job settings (asks first). */
@@ -181,7 +193,7 @@ export function TransformPage(c: PageCtx) {
         />
         <small className="hint">Drag a profile on the canvas to move it relative to the other one (it updates Move X / Y below).</small>
       </section>
-      <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: null } : {}) })} />
+      <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: emptyPlan() } : {}) })} />
     </>
   );
 }
@@ -366,7 +378,7 @@ function PairingSection(c: PageCtx) {
     pairs[r] = t;
     const sync = { ...job.contours.sync };
     delete sync[r];
-    patch({ contours: { ...job.contours, pairs, sync }, plan: null });
+    patch({ contours: { ...job.contours, pairs, sync }, plan: emptyPlan() });
   };
   return (
     <section>
@@ -415,7 +427,7 @@ function PairingSection(c: PageCtx) {
           })}
         </tbody>
       </table>
-      <button disabled={!job.contours.pairs} onClick={() => patch({ contours: { ...job.contours, pairs: null, sync: {} }, plan: null })}>
+      <button disabled={!job.contours.pairs} onClick={() => patch({ contours: { ...job.contours, pairs: null, sync: {} }, plan: emptyPlan() })}>
         Pair automatically
       </button>
     </section>
@@ -480,7 +492,7 @@ export function SegmentPage(c: PageCtx) {
         <button
           disabled={!hand}
           onClick={() => {
-            patch({ sync: null, contours: { ...job.contours, sync: {} }, plan: null });
+            patch({ sync: null, contours: { ...job.contours, sync: {} }, plan: emptyPlan() });
             c.setNotice(null);
           }}
         >
@@ -490,7 +502,7 @@ export function SegmentPage(c: PageCtx) {
           label="Corner split angle (°)"
           value={job.cornerSplitDeg}
           min={1}
-          onChange={(v) => patch({ cornerSplitDeg: v, sync: null, contours: { ...job.contours, sync: {} }, plan: null })}
+          onChange={(v) => patch({ cornerSplitDeg: v, sync: null, contours: { ...job.contours, sync: {} }, plan: emptyPlan() })}
           hint="Corners sharper than this become automatic splits. Changing it resets the splits and the plan."
         />
       </section>
@@ -534,13 +546,28 @@ export function SequencePage(c: PageCtx) {
         plan={plan}
         result={result}
         onChange={(p) => patch({ plan: p })}
-        onLoop={(reversed) => patch({ plan: loopPlanFor(result, reversed) })}
-        onLeTe={c.applyLeTe}
         selected={c.selectedStep}
         onSelect={c.setSelectedStep}
+        pair={c.selectedPair}
+        onPair={c.setSelectedPair}
+        onTemplate={c.applyTemplate}
+        onSequenceAll={c.sequenceAll}
+        onClear={c.clearSequence}
+        bar={c.bar}
+        onBar={c.setBar}
+        pick={c.pick}
+        onPick={c.setPick}
+        onJogHome={c.jogHome}
       />
       <section>
-        <h2>Template &amp; run-out settings</h2>
+        <h2>Jog &amp; run-out settings</h2>
+        <NumberField
+          label={`Jog clearance (${u})`}
+          value={job.jogClearance}
+          min={0}
+          onChange={(v) => patch({ jogClearance: v })}
+          hint="How far above the block (or the profiles, with no block) jogs over the block travel and plunges start"
+        />
         <NumberField label={`Template clearance (${u})`} value={c.clearance} min={0} onChange={c.setClearance} hint="How far outside the block the LE→TE template puts run-in/out and jog points" />
         <NumberField label={`Out-and-back distance (${u})`} value={c.outBack} min={0} onChange={c.setOutBack} hint="How far past the split an out-and-back runs out" />
         <small className="hint">
@@ -551,7 +578,6 @@ export function SequencePage(c: PageCtx) {
   );
 }
 
-const loopPlanFor = (result: CutResult, reversed: boolean) => loopPlan(result.topology ?? result.stats.segments, reversed, result.entries);
 
 // ---------------------------------------------------------------- 6. Preview
 export function PreviewPage(c: PageCtx) {

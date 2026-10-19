@@ -244,3 +244,22 @@ table.contours select { width: 100%; }
 /* two fields side by side (left / right measurements) */
 .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .dual .field { min-width: 0; grid-template-columns: 1fr; gap: 2px; }
+
+/* ---- sequence tree (Sequence Cuts) */
+.steps.nested { margin: 2px 0 2px 14px; padding-left: 6px; border-left: 1px dashed var(--border); }
+.steps li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.steps li.folder.drop-into > .folder-head { outline: 2px solid var(--accent); }
+.steps .end-drop { min-height: 10px; }
+.folder-head { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; background: var(--panel2, #16161a); cursor: grab; font-size: 12px; }
+.folder-head .folder-name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-head input { flex: 1; font-size: 12px; }
+.folder-head .twisty { padding: 0 4px; }
+.step[draggable='true'] { cursor: grab; }
+.step.rolled { opacity: 0.35; }
+.rollback { display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 4px 8px; border-radius: 4px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; cursor: ns-resize; }
+.rollback.up { background: var(--warn); color: #000; }
+.rollback .grip { opacity: 0.8; }
+.rollback button { margin-left: auto; padding: 0 6px; font-size: 11px; }
+.pair-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.pair-chips button { display: inline-flex; align-items: center; gap: 4px; }
+.insert-bar { align-items: center; }

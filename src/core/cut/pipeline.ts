@@ -5,11 +5,11 @@ import { writeGcode, type CarriagePos, type Move } from '../gcode/writer';
 import { contourOfSeg, makeTopology, type CutPlan, type Topology } from '../plan/model';
 import { loopPlan, type ContourEntry, type Rect } from '../plan/templates';
 import { joinOffsetLoops, splitOffsetLoop, walkPlan, type Gap, type OffsetLoop, type PathPt } from '../plan/walk';
-import { arcLoop, nearestS, pointAtS, wrapS, type ArcLoop } from '../geom/arc';
+import { arcLoop, nearestS, pointAtS, withinS, wrapS, type ArcLoop } from '../geom/arc';
 import { isClosed } from '../geom/profile';
 import { addSplit, setLoopStart } from '../sync/edit';
 import { autoSync, segCount, syncStations, type SyncSettings } from '../sync/sync';
-import { autoKerfSide, autoPairs, closestBetween, nearestSplit, offsetSide, type KerfSide } from './contours';
+import { autoKerfSide, autoPairs, nearestSplit, offsetSide, type KerfSide } from './contours';
 import type { OffsetSide } from './kerf';
 import type { JobSettings, MachinePreset } from '../types';
 import { findDwells } from './dwell';
@@ -162,6 +162,39 @@ function emptyResult(errors: string[], stage: Stage, warnings: CutWarning[] = []
   };
 }
 
+/** Safe jog height: the block's top (or the profiles' top, with no block) plus the jog clearance. */
+export function safeHeight(job: JobSettings, pairs: PairResult[]): number {
+  const top = hasBlock(job.block) ? job.block.y + job.block.h : Math.max(...pairs.flatMap((p) => [...p.pts.root, ...p.pts.tip].map((q) => q.y)));
+  return top + (job.jogClearance ?? 0.5);
+}
+
+/**
+ * Start a closed contour at its highest point: a split there on the root (the tip's at the
+ * matching place, or its own highest point when that falls in the same stretch), made the start.
+ */
+function startAtTop(sync: SyncSettings, arcs: { root: ArcLoop; tip: ArcLoop }): SyncSettings {
+  const top = (a: ArcLoop) => {
+    let best = 0;
+    for (let i = 1; i < a.pts.length - 1; i++) if (a.pts[i].y > a.pts[best].y) best = i;
+    return a.cum[best];
+  };
+  const sr = top(arcs.root);
+  const near = (list: number[], s: number, a: ArcLoop) => list.findIndex((x) => Math.abs(wrapS(a, x - s)) < 1e-6 || Math.abs(wrapS(a, s - x)) < 1e-6);
+  let next = sync;
+  let k = near(next.root, sr, arcs.root);
+  if (k < 0) {
+    const ed = addSplit(next, null, arcs, 'root', sr);
+    if (!ed) return sync;
+    next = ed.sync;
+    k = near(next.root, sr, arcs.root);
+  }
+  // the tip's own top point, if it stays between that split's neighbours
+  const st = top(arcs.tip);
+  const n = next.tip.length;
+  if (n > 1 && withinS(arcs.tip, next.tip[(k - 1 + n) % n], next.tip[(k + 1) % n], st)) next = { ...next, tip: next.tip.map((x, j) => (j === k ? st : x)) };
+  return k > 0 ? setLoopStart(next, null, k).sync : next;
+}
+
 const closeLoop = (s: Station[]) => (s.length ? [...s, { ...s[0], boundary: false }] : s);
 
 const hasBlock = (b: Rect) => b.w > 0 && b.h > 0;
@@ -283,26 +316,16 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
     }
   }
 
-  // Default entries: leave the outer contour where it comes closest to each other contour.
+  // Closed inner contours start at their highest point on each face, so a plunge from above
+  // cuts the shortest slot down through the part.
   const outer = pairs[0];
   for (const pr of pairs.slice(1)) {
-    const near = closestBetween(outer.arcs.root, pr.arcs.root);
-    if (outer.auto) {
-      const ed = addSplit(outer.sync, null, outer.arcs, 'root', near.sa);
+    if (pr.auto && pr.closed) pr.sync = startAtTop(pr.sync, pr.arcs);
+    // old-style plans (the old default, or edited from it; no folders) enter each contour from the outline split nearest its start
+    if (!job.plan?.groups && outer.auto) {
+      const sOut = nearestS(outer.arcs.root, pointAtS(pr.arcs.root, pr.sync.root[0])).s;
+      const ed = addSplit(outer.sync, null, outer.arcs, 'root', sOut);
       if (ed) outer.sync = ed.sync;
-    }
-    if (pr.auto && pr.closed) {
-      // start the contour at the point nearest the outer contour
-      const sIn = nearestS(pr.arcs.root, pointAtS(outer.arcs.root, near.sa)).s;
-      let k = pr.sync.root.findIndex((x) => Math.abs(x - sIn) < 1e-6);
-      if (k < 0) {
-        const ed = addSplit(pr.sync, null, pr.arcs, 'root', sIn);
-        if (ed) {
-          pr.sync = ed.sync;
-          k = pr.sync.root.findIndex((x) => Math.abs(x - wrapS(pr.arcs.root, sIn)) < 1e-9);
-        }
-      }
-      if (k > 0) pr.sync = setLoopStart(pr.sync, null, k).sync;
     }
   }
   const syncT = outer.sync;
@@ -396,7 +419,7 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
   const pathExtra = { ...extra, topology, entries, stations, kerfStations, plan };
   let walk;
   try {
-    walk = walkPlan(plan, joinOffsetLoops(loops), home, topology);
+    walk = walkPlan(plan, joinOffsetLoops(loops), home, topology, safeHeight(job, pairs));
   } catch (e) {
     const res = emptyResult([`${(e as Error).message} Reset the plan with a template.`], 'sequence', warnings);
     return Object.assign(res, pathExtra);
@@ -407,6 +430,15 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
         ? 'The plan does not end at home. Add a line back to home (or use "Bridge").'
         : `Gap before step ${g.before + 1}: it doesn't start where step ${g.before} ends. Bridge it with a jog or cut, or reorder the steps.`,
     );
+  }
+  if (!plan.steps.length) {
+    errors.push('Nothing is sequenced yet. Pick a contour pair and a template, or press "Sequence all".');
+  } else {
+    topology.contours.forEach((c, p) => {
+      if (c.segs && walk.segUse.slice(c.seg0, c.seg0 + c.segs).every((n) => n === 0)) {
+        errors.push(`Pair ${p + 1} isn't sequenced yet: pick it and a template, or add its segments.`);
+      }
+    });
   }
   walk.segUse.forEach((count, k) => {
     // an open contour is normally cut there and back
