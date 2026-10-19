@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 
 /** Number input that lets you type freely and only reports valid numbers. */
+// Values set by the app (fits, templates) can have long tails; show at most 6 significant decimals.
+const show = (v: number) => String(Number(v.toFixed(6)));
+
 export function NumberField(props: { label: string; value: number; onChange: (v: number) => void; step?: number; min?: number; hint?: string }) {
-  const [text, setText] = useState(String(props.value));
+  const [text, setText] = useState(show(props.value));
   useEffect(() => {
-    if (parseFloat(text) !== props.value) setText(String(props.value));
+    if (parseFloat(text) !== props.value) setText(show(props.value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.value]);
   return (

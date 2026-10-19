@@ -161,11 +161,9 @@ describe('full cut', () => {
     expect(res.gcode).toBe('');
   });
 
-  it('runs lead-in waypoints out and back', () => {
-    const job = { ...defaultJob(machine, material), leadIn: [{ x: 4, y: 5 }] };
-    const res = generateCut(sq, sq, job, machine);
-    expect(res.moves[0].left).toEqual({ x: 4, y: 5 });
-    expect(res.moves.at(-2)!.left).toEqual({ x: 4, y: 5 });
+  it('starts and ends every plan at home', () => {
+    const res = generateCut(sq, sq, defaultJob(machine, material), machine);
+    expect(res.start.left).toEqual(machine.home);
     expect(res.moves.at(-1)!.left).toEqual(machine.home);
   });
 });

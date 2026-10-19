@@ -1,4 +1,5 @@
 import type { Vec2 } from './geom/vec';
+import type { CutPlan } from './plan/model';
 
 export type Units = 'in' | 'mm';
 
@@ -19,6 +20,8 @@ export interface MachinePreset {
   travel: { x: [number, number]; y: [number, number] };
   /** Per-carriage speed cap, units/min. Exceeding it warns, and export stretches the move. */
   maxSpeed: number;
+  /** Speed of jog lines (coordinated G1, measured on the faster carriage), units/min. */
+  jogSpeed: number;
   /** Home position; both carriages go here, so the wire is straight. */
   home: Vec2;
   axes: AxisLetters;
@@ -68,6 +71,8 @@ export interface JobSettings {
   sampling: SamplingSettings;
   /** Corners sharper than this become automatic split points. */
   cornerSplitDeg: number;
-  /** Straight-wire waypoints between home and the loop start (lead-out runs them in reverse). */
-  leadIn: Vec2[];
+  /** Foam block outline on the faces (same on both). w or h of 0 means "not set": no block checks. */
+  block: { x: number; y: number; w: number; h: number };
+  /** Cut plan; null = the default Loop template for however many segments the profiles have. */
+  plan: CutPlan | null;
 }

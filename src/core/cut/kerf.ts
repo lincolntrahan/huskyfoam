@@ -8,6 +8,8 @@ export interface Station {
   seg: number;
   /** True for the first station of a segment (a split point). */
   boundary: boolean;
+  /** Set by offsetStations: part of the corner (arc or single miter point) at the segment's start split. */
+  corner?: boolean;
 }
 
 const EPS = 1e-9;
@@ -77,7 +79,7 @@ export function offsetStations(
     const ct = sideCorner(T, i, kerfTip(s.seg) / 2, s.boundary);
     const m = Math.max(cr.arcCount, ct.arcCount);
     for (let j = 0; j <= m; j++) {
-      out.push({ r: cr.at(j, m), t: ct.at(j, m), seg: s.seg, boundary: s.boundary && j === 0 });
+      out.push({ r: cr.at(j, m), t: ct.at(j, m), seg: s.seg, boundary: s.boundary && j === 0, corner: s.boundary });
     }
   });
   return out;
