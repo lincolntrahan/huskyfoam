@@ -102,10 +102,10 @@ describe('block around the profiles', () => {
   });
 
   it('centres, or puts the profiles on the bottom or top face, vertically', () => {
-    const m = box(job({ block, vertical: 'middle' }));
+    const m = box(job({ block, vertical: 'middle', floor: 1.5 })); // high enough that a centred block clears the floor
     expect(m.b.y + m.b.h / 2).toBeCloseTo((m.y0 + m.y1) / 2, 9);
     expect(box(job({ block, vertical: 'bottom' })).b.y).toBeCloseTo(0.5, 9);
-    const t = box(job({ block, vertical: 'top' }));
+    const t = box(job({ block, vertical: 'top', floor: 1.5 }));
     expect(t.b.y + t.b.h).toBeCloseTo(t.y1, 9);
   });
 
@@ -147,5 +147,24 @@ describe('carriages and the floor', () => {
     const carY = res.moves.filter((m) => !m.lead).flatMap((m) => [m.left.y, m.right.y]);
     expect(Math.min(...carY)).toBeCloseTo(machine.travel.y[0], 9);
     expect(res.warnings.map((w) => w.message).join(' ')).not.toMatch(/travel limits/);
+  });
+});
+
+describe('block and the floor', () => {
+  it('rests the block on Y = 0 when centring would sink it, leaving the profiles where they are', () => {
+    const tall = job({ floor: 0.25, block: { w: 12, h: 3, len: 0 }, vertical: 'middle' });
+    const p = placeLayout(tall, root, tip, machine);
+    expect(p.blockDropped).not.toBeNull();
+    expect(p.job.block.y).toBe(0);
+    // the profiles still sit at the floor offset
+    const res = generateCut(root, tip, p.job, machine);
+    expect(Math.min(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y))).toBeCloseTo(0.25, 9);
+    // centred would have been this far down
+    const centred = p.job.block.h / 2 - (Math.max(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y)) + 0.25) / 2;
+    expect(p.blockDropped!).toBeCloseTo(centred, 9);
+  });
+
+  it('leaves a block that fits alone', () => {
+    expect(placeLayout(job({ floor: 0.25, block: { w: 12, h: 2, len: 0 }, vertical: 'bottom' }), root, tip, machine).blockDropped).toBeNull();
   });
 });

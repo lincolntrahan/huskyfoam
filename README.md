@@ -57,7 +57,7 @@ You only arrange the profiles relative to each other (on *Arrange Profiles*). Wh
   - along the chord: profiles centred, or against the −X or +X side;
   - vertically: profiles in the middle, on the bottom face, or against the top face.
 - *Fit block to profiles* sizes the block to just hold both profiles.
-- **Shims**: Place in Machine and Export say how far above the floor the block's bottom face has to sit, so you can shim it up (and warn if the settings would put it below the floor).
+- **Shims**: Place in Machine and Export say how far above the floor the block's bottom face has to sit, so you can shim it up. If centring the profiles (or putting them against the top face) would sink the block below the floor, it rests on the floor instead, the profiles stay where they are, and a note says how much higher they would need to be.
 
 ### 3D view
 

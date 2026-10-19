@@ -73,6 +73,11 @@ export interface Placement {
    * so the profiles were raised. The lowest profile point's actual height above Y = 0.
    */
   raisedTo: number | null;
+  /**
+   * Set when the vertical alignment would have put the block below the floor: it sits on Y = 0
+   * instead, and this is how far below the floor it would have gone.
+   */
+  blockDropped: number | null;
 }
 
 /**
@@ -85,7 +90,7 @@ export function placeJob(job: JobSettings, root: Profile[], tip: Profile[], mach
 }
 
 export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], machine: MachinePreset, hold?: Vec2 | null): Placement {
-  const done = (j: JobSettings, raisedTo: number | null = null): Placement => ({ job: j, raisedTo });
+  const done = (j: JobSettings, raisedTo: number | null = null, blockDropped: number | null = null): Placement => ({ job: j, raisedTo, blockDropped });
   const layout = job.layout;
   if (!layout) return done(job);
   const w = wireLayout(job, layout);
@@ -141,7 +146,13 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
           h: bh,
         }
       : base.block;
-  return done({ ...base, offset, block }, raisedTo);
+  // the block can't sit below the floor: rest it on Y = 0 and leave the profiles where they are
+  let blockDropped: number | null = null;
+  if (block.w > 0 && block.y < -1e-9) {
+    blockDropped = -block.y;
+    block.y = 0;
+  }
+  return done({ ...base, offset, block }, raisedTo, blockDropped);
 }
 
 /** The block size that just holds the profiles, plus `margin` all round (and the profile distance along the wire). */
