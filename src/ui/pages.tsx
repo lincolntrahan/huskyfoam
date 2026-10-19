@@ -22,6 +22,8 @@ export interface PageCtx {
   placed: JobSettings;
   /** Set when the profiles had to sit higher than the floor offset to keep the carriages in travel. */
   raisedTo: number | null;
+  /** Set when the vertical alignment would have put the block below the floor (it sits on Y = 0 instead). */
+  blockDropped: number | null;
   patch: (p: Partial<JobSettings>) => void;
   result: CutResult | null;
   plan: CutPlan | null;
@@ -206,14 +208,7 @@ function ShimCallout({ placed, units }: { placed: JobSettings; units: string }) 
   const b = placed.block;
   if (!(b.w > 0 && b.h > 0)) return null;
   const y = Math.round(b.y * 1000) / 1000;
-  if (y < 0) {
-    return (
-      <div className="callout err">
-        The block would sit <strong>{-y} {units} below the floor</strong>, which it can't. Raise the height above floor, use a shorter block, or put
-        the profiles on the block's bottom face.
-      </div>
-    );
-  }
+  // placement never puts the block below the floor (it rests on Y = 0 instead)
   if (y === 0) return <div className="callout">The block sits straight on the floor: no shims needed.</div>;
   return (
     <div className="callout warn">
@@ -345,6 +340,13 @@ export function SetupPage(c: PageCtx) {
             ? `Block X ${r3(placed.block.x)} to ${r3(placed.block.x + placed.block.w)}, Y ${r3(placed.block.y)} to ${r3(placed.block.y + placed.block.h)}; faces ${r3(placed.rootFaceFromLeft)} and ${r3(placed.rootFaceFromLeft + placed.span)} from the left carriage.`
             : 'Width or height 0 = no block: jog-through-foam checks are off.'}
         </small>
+        {c.blockDropped !== null && (
+          <div className="callout warn">
+            {L.vertical === 'top' ? 'Putting the profiles against the top face' : 'Centring the profiles'} would put the block {r3(c.blockDropped)} {u} below
+            the floor, so it sits on the floor (Y = 0) instead and the profiles aren't {L.vertical === 'top' ? 'against its top face' : 'centred in it'}. Raise
+            the height above floor by {r3(c.blockDropped)} {u} to {L.vertical === 'top' ? 'put them there' : 'centre them'}.
+          </div>
+        )}
         <ShimCallout placed={placed} units={u} />
       </section>
     </>
