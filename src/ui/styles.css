@@ -241,3 +241,21 @@ button.wide { width: 100%; margin-top: 4px; }
 .callout strong { font-size: 20px; color: var(--accent); }
 .callout small { color: var(--muted); font-size: 11px; }
 .callout.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+
+/* ---- DXF picker ---- */
+.pickers { display: grid; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--border); min-height: 0; }
+.dxf-picker { display: grid; grid-template-rows: auto 1fr; background: var(--canvas); min-height: 0; }
+.dxf-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 12px; }
+.dxf-picker svg { width: 100%; height: 100%; display: block; min-height: 0; cursor: crosshair; }
+.empty-panel { display: grid; place-items: center; color: var(--muted); background: var(--canvas); }
+.ok-text { color: #16a34a; }
+.err-text { color: var(--err); }
+
+/* ---- 3D view ---- */
+.view-toggle { position: absolute; top: 8px; left: 8px; z-index: 3; background: var(--panel); }
+.view3d canvas { display: block; }
+.playback { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.playback input[type='range'] { flex: 1; min-width: 80px; }
+.playback .time { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.playback button { min-width: 34px; }
+.hint3d { position: absolute; left: 8px; bottom: 54px; color: var(--muted); font-size: 11px; pointer-events: none; }

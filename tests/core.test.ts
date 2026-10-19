@@ -167,3 +167,30 @@ describe('full cut', () => {
     expect(res.moves.at(-1)!.left).toEqual(machine.home);
   });
 });
+
+describe('choosing DXF entities', () => {
+  const sq = square(2, 5, 2);
+  const text = dxf(sq.map((p, i) => line(p, sq[(i + 1) % 4])).join('') + line({ x: 0, y: 0 }, { x: 1, y: 3 }) + '0\nMTEXT\n10\n0\n20\n-1\n40\n0.2\n1\nSOLIDWORKS Educational Product.\n');
+
+  it('auto-picks the closed outline and leaves stray lines and text out', async () => {
+    const { loadDxfProfile } = await import('../src/core/io/loadProfile');
+    const r = loadDxfProfile(text, 'in');
+    expect(r.edges).toHaveLength(5);
+    expect(r.used).toEqual([0, 1, 2, 3]);
+    expect(r.selected).toEqual([0, 1, 2, 3]);
+    expect(r.texts.map((t) => t.text)).toEqual(['SOLIDWORKS Educational Product.']);
+    expect(r.profile).not.toBeNull();
+  });
+
+  it('uses only the chosen entities', async () => {
+    const { loadDxfProfile } = await import('../src/core/io/loadProfile');
+    const open = loadDxfProfile(text, 'in', [0, 1, 2]);
+    expect(open.profile).toBeNull();
+    expect(open.warnings.join(' ')).toMatch(/No closed outline/);
+    const none = loadDxfProfile(text, 'in', []);
+    expect(none.warnings).toContain('No entities selected.');
+    const withStray = loadDxfProfile(text, 'in', [0, 1, 2, 3, 4]);
+    expect(withStray.used).toEqual([0, 1, 2, 3]);
+    expect(withStray.selected).toEqual([0, 1, 2, 3, 4]);
+  });
+});

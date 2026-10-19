@@ -40,6 +40,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     sampling: { ...d.sampling, ...(job.sampling ?? {}) },
     block: { ...d.block, ...(job.block ?? {}) },
     profile: { ...d.profile, ...(job.profile ?? {}) },
+    selection: { ...d.selection, ...(job.selection ?? {}) },
     dwell: { ...d.dwell, ...(job.dwell ?? {}) },
     transforms: {
       ...defaultTransforms(),

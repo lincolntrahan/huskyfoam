@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { generateCut } from '../core/cut/pipeline';
 import type { Profile } from '../core/geom/profile';
 import type { Vec2 } from '../core/geom/vec';
@@ -14,12 +14,15 @@ import exampleRoot from '../../tests/fixtures/vtail-root.dxf?raw';
 import exampleTip from '../../tests/fixtures/vtail-tip.dxf?raw';
 import { ExportPage, ImportPage, PreviewPage, SegmentPage, SequencePage, SetupPage, TransformPage, type PageCtx } from './pages';
 import { download, MachineEditor, MaterialEditor } from './PresetEditor';
+import { DxfPicker } from './DxfPicker';
 import { Preview2D, type Layers, type Sides } from './Preview2D';
 import { Stepper } from './Stepper';
 import { STEPS, stagesUpTo, stepStates, type StepId } from './steps';
 import { usePresets } from './usePresets';
 
 const AUTOSAVE = 'huskyfoam:autosave';
+// three.js is big: only load it when someone opens the 3D view
+const View3D = lazy(() => import('./View3D'));
 
 /** Bounding box of the given (already positioned) points, grown by `margin`. */
 function fitBlock(pts: Vec2[], margin: number): Rect {
@@ -44,6 +47,7 @@ export function App() {
   const [tipFile, setTipFile] = useState<SourceFile | null>(null);
   const [page, setPage] = useState<StepId>('import');
   const [layers, setLayers] = useState<Layers>(STEPS[0].layers);
+  const [view3d, setView3d] = useState(false);
   const [sides, setSides] = useState<Sides>('both');
   const [clearance, setClearance] = useState(0.5);
   const [outBack, setOutBack] = useState(1);
@@ -64,8 +68,10 @@ export function App() {
     }));
   };
 
-  const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units) : null), [rootFile, machine.units]);
-  const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units) : null), [tipFile, machine.units]);
+  const root = useMemo(() => (rootFile ? loadDxfProfile(rootFile.text, machine.units, job.selection.root) : null), [rootFile, machine.units, job.selection.root]);
+  const tip = useMemo(() => (tipFile ? loadDxfProfile(tipFile.text, machine.units, job.selection.tip) : null), [tipFile, machine.units, job.selection.tip]);
+  /** Changing which entities make up a profile changes its splits, so sync and plan start over. */
+  const setSelection = (side: 'root' | 'tip', sel: number[] | null) => patch({ selection: { ...job.selection, [side]: sel }, sync: null, plan: null });
   const result = useMemo(
     () => (root?.profile && tip?.profile ? generateCut(root.profile, tip.profile, job, machine) : null),
     [root, tip, job, machine],
@@ -84,6 +90,7 @@ export function App() {
     if (states[id].status === 'locked') return;
     setPage(id);
     setLayers(STEPS.find((s) => s.id === id)!.layers);
+    if (id === 'preview') setView3d(true);
     setSelectedStep(null);
   };
   // if what you're looking at becomes locked (e.g. a profile was replaced), fall back to the last open page
@@ -182,6 +189,7 @@ export function App() {
       block: fitBlock([...rootLoaded.pts, ...tipLoaded.pts].map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })), 0.1),
       sync: null,
       plan: null,
+      selection: { root: null, tip: null },
     });
   };
 
@@ -213,11 +221,11 @@ export function App() {
     tip,
     loadRoot: (f) => {
       setRootFile(f);
-      patch({ plan: null, sync: null });
+      setJob((j) => ({ ...j, plan: null, sync: null, selection: { ...j.selection, root: null } }));
     },
     loadTip: (f) => {
       setTipFile(f);
-      patch({ plan: null, sync: null });
+      setJob((j) => ({ ...j, plan: null, sync: null, selection: { ...j.selection, tip: null } }));
     },
     loadExample,
     fitBlock: () => fitBlock(cutPts(), 0.1),
@@ -306,6 +314,32 @@ export function App() {
 
         <div className="workspace">
           <div style={{ position: 'relative', minHeight: 0, display: 'grid' }}>
+            <div className="segmented view-toggle" role="group" aria-label="2D or 3D view">
+              <button className={!view3d ? 'active' : ''} aria-pressed={!view3d} onClick={() => setView3d(false)}>
+                2D
+              </button>
+              <button className={view3d ? 'active' : ''} aria-pressed={view3d} onClick={() => setView3d(true)}>
+                3D
+              </button>
+            </div>
+            {view3d ? (
+              <Suspense fallback={<div className="canvas-wrap"><div className="empty">Loading 3D view…</div></div>}>
+                <View3D result={result} job={job} machine={machine} />
+              </Suspense>
+            ) : page === 'import' ? (
+              <div className="pickers">
+                {root ? (
+                  <DxfPicker label={`Root: ${rootFile?.name}`} color="var(--root)" loaded={root} selection={job.selection.root} onChange={(s) => setSelection('root', s)} />
+                ) : (
+                  <div className="empty-panel">Open a root DXF to choose its geometry.</div>
+                )}
+                {tip ? (
+                  <DxfPicker label={`Tip: ${tipFile?.name}`} color="var(--tip)" loaded={tip} selection={job.selection.tip} onChange={(s) => setSelection('tip', s)} />
+                ) : (
+                  <div className="empty-panel">Open a tip DXF to choose its geometry.</div>
+                )}
+              </div>
+            ) : (
             <Preview2D
               mode={page}
               root={root?.profile ?? null}
@@ -325,6 +359,8 @@ export function App() {
               sides={sides}
               rootSide={job.rootSide}
             />
+            )}
+            {!view3d && page !== 'import' && (
             <div className="layers">
               <div className="segmented" role="group" aria-label="Which face to show">
                 {(
@@ -353,6 +389,7 @@ export function App() {
                 </label>
               ))}
             </div>
+            )}
           </div>
 
           <div className="status">
