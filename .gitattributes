@@ -1,0 +1,2 @@
+# G-code fixtures are compared byte-for-byte with LF output; never convert them.
+*.nc text eol=lf
