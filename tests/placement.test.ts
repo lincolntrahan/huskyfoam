@@ -151,20 +151,28 @@ describe('carriages and the floor', () => {
 });
 
 describe('block and the floor', () => {
-  it('rests the block on Y = 0 when centring would sink it, leaving the profiles where they are', () => {
+  it('raises the profiles so a centred block rests on Y = 0 with them still centred', () => {
     const tall = job({ floor: 0.25, block: { w: 12, h: 3, len: 0 }, vertical: 'middle' });
     const p = placeLayout(tall, root, tip, machine);
-    expect(p.blockDropped).not.toBeNull();
-    expect(p.job.block.y).toBe(0);
-    // the profiles still sit at the floor offset
+    expect(p.liftedTo).not.toBeNull();
+    expect(p.job.block.y).toBeCloseTo(0, 9);
     const res = generateCut(root, tip, p.job, machine);
-    expect(Math.min(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y))).toBeCloseTo(0.25, 9);
-    // centred would have been this far down
-    const centred = p.job.block.h / 2 - (Math.max(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y)) + 0.25) / 2;
-    expect(p.blockDropped!).toBeCloseTo(centred, 9);
+    const ys = [...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y);
+    expect(Math.min(...ys)).toBeCloseTo(p.liftedTo!, 9);
+    expect(p.liftedTo!).toBeGreaterThan(0.25);
+    // still centred in the block
+    expect((Math.min(...ys) + Math.max(...ys)) / 2).toBeCloseTo(p.job.block.y + p.job.block.h / 2, 9);
+  });
+
+  it('does the same for profiles against the top face', () => {
+    const p = placeLayout(job({ floor: 0.25, block: { w: 12, h: 3, len: 0 }, vertical: 'top' }), root, tip, machine);
+    const res = generateCut(root, tip, p.job, machine);
+    const top = Math.max(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y));
+    expect(p.job.block.y).toBeCloseTo(0, 9);
+    expect(top).toBeCloseTo(3, 9);
   });
 
   it('leaves a block that fits alone', () => {
-    expect(placeLayout(job({ floor: 0.25, block: { w: 12, h: 2, len: 0 }, vertical: 'bottom' }), root, tip, machine).blockDropped).toBeNull();
+    expect(placeLayout(job({ floor: 0.25, block: { w: 12, h: 2, len: 0 }, vertical: 'bottom' }), root, tip, machine).liftedTo).toBeNull();
   });
 });

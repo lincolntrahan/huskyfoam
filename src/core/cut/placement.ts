@@ -74,10 +74,11 @@ export interface Placement {
    */
   raisedTo: number | null;
   /**
-   * Set when the vertical alignment would have put the block below the floor: it sits on Y = 0
-   * instead, and this is how far below the floor it would have gone.
+   * Set when the vertical alignment would have put the block below the floor: the profiles were
+   * raised so the block sits on Y = 0 with them still in place in it. The lowest profile point's
+   * resulting height above Y = 0.
    */
-  blockDropped: number | null;
+  liftedTo: number | null;
 }
 
 /**
@@ -90,7 +91,7 @@ export function placeJob(job: JobSettings, root: Profile[], tip: Profile[], mach
 }
 
 export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], machine: MachinePreset, hold?: Vec2 | null): Placement {
-  const done = (j: JobSettings, raisedTo: number | null = null, blockDropped: number | null = null): Placement => ({ job: j, raisedTo, blockDropped });
+  const done = (j: JobSettings, raisedTo: number | null = null, liftedTo: number | null = null): Placement => ({ job: j, raisedTo, liftedTo });
   const layout = job.layout;
   if (!layout) return done(job);
   const w = wireLayout(job, layout);
@@ -135,10 +136,10 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
     offset = { x: machine.travel.x[0] - minX, y: dy };
   }
 
-  const b = { x0: b0.x0 + offset.x, x1: b0.x1 + offset.x, y0: b0.y0 + offset.y, y1: b0.y1 + offset.y };
   const { w: bw, h: bh } = layout.block;
-  const block =
-    bw > 0 && bh > 0
+  const blockFor = (o: Vec2) => {
+    const b = { x0: b0.x0 + o.x, x1: b0.x1 + o.x, y0: b0.y0 + o.y, y1: b0.y1 + o.y };
+    return bw > 0 && bh > 0
       ? {
           x: layout.alongChord === 'left' ? b.x0 : layout.alongChord === 'right' ? b.x1 - bw : (b.x0 + b.x1) / 2 - bw / 2,
           y: layout.vertical === 'bottom' ? b.y0 : layout.vertical === 'top' ? b.y1 - bh : (b.y0 + b.y1) / 2 - bh / 2,
@@ -146,13 +147,21 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
           h: bh,
         }
       : base.block;
-  // the block can't sit below the floor: rest it on Y = 0 and leave the profiles where they are
-  let blockDropped: number | null = null;
+  };
+  let block = blockFor(offset);
+  // The block can't sit below the floor: raise the profiles until it rests on Y = 0, so they stay
+  // centred in it (or against its top face). While a profile is dragged the offset is held, so the
+  // block just rests on the floor until the drag ends.
+  let liftedTo: number | null = null;
   if (block.w > 0 && block.y < -1e-9) {
-    blockDropped = -block.y;
-    block.y = 0;
+    if (hold) block = { ...block, y: 0 };
+    else {
+      offset = { x: offset.x, y: offset.y - block.y };
+      block = blockFor(offset);
+      liftedTo = b0.y0 + offset.y;
+    }
   }
-  return done({ ...base, offset, block }, raisedTo, blockDropped);
+  return done({ ...base, offset, block }, raisedTo, liftedTo);
 }
 
 /** The block size that just holds the profiles, plus `margin` all round (and the profile distance along the wire). */

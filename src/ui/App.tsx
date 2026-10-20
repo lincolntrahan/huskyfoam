@@ -304,7 +304,7 @@ export function App() {
     job,
     placed,
     raisedTo: placement.raisedTo,
-    blockDropped: placement.blockDropped,
+    liftedTo: placement.liftedTo,
     patch,
     result,
     plan,
