@@ -670,6 +670,10 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
             <li>
               {machine.feedMode} feed, axes {machine.axisOrder.map((k) => machine.axes[k]).join(' ')}, {machine.units === 'in' ? 'inches' : 'mm'}
             </li>
+            <li className="hint">
+              Mach3's feed readout shows the combined speed of all four axes, not the wire speed: about 1.41× when root and tip move together, and a
+              varying amount on a tapered part. Time a move with a stopwatch to check the real speed.
+            </li>
           </ul>
         )}
       </section>
