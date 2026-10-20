@@ -12,7 +12,9 @@ export type AlignV = 'middle' | 'bottom' | 'top';
  * - along the wire, the left profile is `profileFromLeft` from the left carriage;
  * - vertically, the lowest profile point is `floor` above Y = 0, or higher if a carriage would
  *   otherwise go below its travel limit (a steep slope between the profiles);
- * - in X, the part is pushed toward the origin until a carriage would go past the travel limit;
+ * - in X, the block's front face (or the profiles' front, with no block) sits `setback` past the
+ *   X travel limit, so jogs up and down at home's X clear the block; further back if a carriage
+ *   would otherwise go past the limit;
  * - the block is placed around the profiles by the three alignments.
  */
 export interface Layout {
@@ -33,7 +35,12 @@ export interface Layout {
    * or the -X / +X side (the ends along the wire stay flush). Missing = the default.
    */
   faceMargin?: number;
+  /** Gap between X = 0 (the travel limit) and the block's front face. Missing = the default. */
+  setback?: number;
 }
+
+/** Default setback of the block from X = 0: 1 in (25 mm). */
+export const defaultSetback = (machine: MachinePreset) => (machine.units === 'mm' ? 25 : 1);
 
 /** Default face margin: 0.1 in (2.5 mm). */
 export const defaultFaceMargin = (machine: MachinePreset) => (machine.units === 'mm' ? 2.5 : 0.1);
@@ -46,6 +53,7 @@ export const defaultLayout = (machine: MachinePreset, distance: number): Layout 
   alongChord: 'center',
   vertical: 'middle',
   faceMargin: defaultFaceMargin(machine),
+  setback: defaultSetback(machine),
 });
 
 /** Where the block's ends and the profile planes are along the wire (from the left carriage). */
@@ -120,6 +128,20 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
   if (!outlines.length) return done(base);
   const b0 = bounds(outlines);
 
+  const { w: bw, h: bh } = layout.block;
+  const margin = layout.faceMargin ?? defaultFaceMargin(machine);
+  const blockFor = (o: Vec2) => {
+    const b = { x0: b0.x0 + o.x, x1: b0.x1 + o.x, y0: b0.y0 + o.y, y1: b0.y1 + o.y };
+    return bw > 0 && bh > 0
+      ? {
+          x: layout.alongChord === 'left' ? b.x0 - margin : layout.alongChord === 'right' ? b.x1 - bw + margin : (b.x0 + b.x1) / 2 - bw / 2,
+          y: layout.vertical === 'bottom' ? b.y0 - margin : layout.vertical === 'top' ? b.y1 - bh + margin : (b.y0 + b.y1) / 2 - bh / 2,
+          w: bw,
+          h: bh,
+        }
+      : base.block;
+  };
+
   let offset = hold ?? null;
   let raisedTo: number | null = null;
   if (!offset) {
@@ -142,22 +164,13 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
       dy = lowest;
       raisedTo = b0.y0 + dy;
     }
-    offset = { x: machine.travel.x[0] - minX, y: dy };
+    // the block's front (or the profiles' front) at the setback, unless a carriage needs it further back
+    const front = bw > 0 && bh > 0 ? blockFor({ x: 0, y: 0 }).x : b0.x0;
+    const setback = layout.setback ?? defaultSetback(machine);
+    const x0 = machine.travel.x[0];
+    offset = { x: Math.max(x0 - minX, x0 + setback - front), y: dy };
   }
 
-  const { w: bw, h: bh } = layout.block;
-  const margin = layout.faceMargin ?? defaultFaceMargin(machine);
-  const blockFor = (o: Vec2) => {
-    const b = { x0: b0.x0 + o.x, x1: b0.x1 + o.x, y0: b0.y0 + o.y, y1: b0.y1 + o.y };
-    return bw > 0 && bh > 0
-      ? {
-          x: layout.alongChord === 'left' ? b.x0 - margin : layout.alongChord === 'right' ? b.x1 - bw + margin : (b.x0 + b.x1) / 2 - bw / 2,
-          y: layout.vertical === 'bottom' ? b.y0 - margin : layout.vertical === 'top' ? b.y1 - bh + margin : (b.y0 + b.y1) / 2 - bh / 2,
-          w: bw,
-          h: bh,
-        }
-      : base.block;
-  };
   let block = blockFor(offset);
   // The block can't sit below the floor: raise the profiles until it rests on Y = 0, so they stay
   // centred in it (or against its top face). While a profile is dragged the offset is held, so the
