@@ -28,7 +28,15 @@ export interface Layout {
   alongChord: AlignH;
   /** Profiles in the block vertically: centred, or on the bottom / top face. */
   vertical: AlignV;
+  /**
+   * Foam left between the profiles and the block face they're set against: the top or bottom face,
+   * or the -X / +X side (the ends along the wire stay flush). Missing = the default.
+   */
+  faceMargin?: number;
 }
+
+/** Default face margin: 0.1 in (2.5 mm). */
+export const defaultFaceMargin = (machine: MachinePreset) => (machine.units === 'mm' ? 2.5 : 0.1);
 
 export const defaultLayout = (machine: MachinePreset, distance: number): Layout => ({
   profileFromLeft: (machine.carriageSpacing - distance) / 2,
@@ -37,6 +45,7 @@ export const defaultLayout = (machine: MachinePreset, distance: number): Layout 
   alongWire: 'center',
   alongChord: 'center',
   vertical: 'middle',
+  faceMargin: defaultFaceMargin(machine),
 });
 
 /** Where the block's ends and the profile planes are along the wire (from the left carriage). */
@@ -137,12 +146,13 @@ export function placeLayout(job: JobSettings, root: Profile[], tip: Profile[], m
   }
 
   const { w: bw, h: bh } = layout.block;
+  const margin = layout.faceMargin ?? defaultFaceMargin(machine);
   const blockFor = (o: Vec2) => {
     const b = { x0: b0.x0 + o.x, x1: b0.x1 + o.x, y0: b0.y0 + o.y, y1: b0.y1 + o.y };
     return bw > 0 && bh > 0
       ? {
-          x: layout.alongChord === 'left' ? b.x0 : layout.alongChord === 'right' ? b.x1 - bw : (b.x0 + b.x1) / 2 - bw / 2,
-          y: layout.vertical === 'bottom' ? b.y0 : layout.vertical === 'top' ? b.y1 - bh : (b.y0 + b.y1) / 2 - bh / 2,
+          x: layout.alongChord === 'left' ? b.x0 - margin : layout.alongChord === 'right' ? b.x1 - bw + margin : (b.x0 + b.x1) / 2 - bw / 2,
+          y: layout.vertical === 'bottom' ? b.y0 - margin : layout.vertical === 'top' ? b.y1 - bh + margin : (b.y0 + b.y1) / 2 - bh / 2,
           w: bw,
           h: bh,
         }

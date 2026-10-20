@@ -55,7 +55,8 @@ You only arrange the profiles relative to each other (on *Arrange Profiles*). Wh
 - **Foam block**: its width (along the chord), height and length (along the wire). Three dropdowns place it around the profiles:
   - along the wire: profiles centred, or the left/right profile on that block face;
   - along the chord: profiles centred, or against the −X or +X side;
-  - vertically: profiles in the middle, on the bottom face, or against the top face.
+  - vertically: profiles in the middle, or near the bottom or top face.
+  - *Margin to block face* (default 0.1 in) is the foam left between the profiles and the face they're set near: top, bottom, −X or +X. Along the wire the profiles sit flush with the face.
 - *Fit block to profiles* sizes the block to just hold both profiles.
 - **Shims**: Place in Machine and Export say how far above the floor the block's bottom face has to sit, so you can shim it up. If centring the profiles (or putting them against the top face) would sink the block below the floor, the profiles are raised instead, so the block rests on the floor with them still centred; a note gives their new height.
 
