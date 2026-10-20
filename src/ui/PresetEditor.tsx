@@ -179,7 +179,7 @@ function KerfTableEditor({ rows, units, onChange }: { rows: KerfPoint[]; units: 
     <div>
       <div className="kt-row kt-head">
         <span>Face speed ({units}/min)</span>
-        <span>Kerf ({units})</span>
+        <span>Kerf, full width ({units})</span>
         <span />
       </div>
       {rows.map((r, i) => (
@@ -220,10 +220,14 @@ function KerfTest({ material, machine, onTable }: { material: MaterialPreset; ma
         Speeds are wire speeds. Mach3's feed readout shows the combined speed of all four axes, so on this straight-wire test it reads about 1.41×
         these numbers (plug 1: about {(plugs[0]?.speed * Math.SQRT2 || 0).toFixed(2)}). The wire is still cutting at the speed listed here.
       </small>
+      <small className="hint">
+        Measure the side of each cut plug (the square that falls out). Kerf = {spec.nominal} {u} − measured: the full width of the slot, which is what
+        the table wants.
+      </small>
       <div className="kt-row kt-head">
         <span>Plug (speed)</span>
-        <span>Measured ({u})</span>
-        <span>Kerf</span>
+        <span>Plug side ({u})</span>
+        <span>Kerf, full</span>
       </div>
       {plugs.map((p, i) => {
         const m = measured[i];
@@ -287,7 +291,25 @@ export function MaterialEditor(props: {
           }}
         />
       </label>
+      <label className="field" title="Below this face speed the cut gets wide and hourglassed. Export warns when a cut needs it; it doesn't block.">
+        <span>Minimum feed speed ({u}/min)</span>
+        <input
+          type="number"
+          step="any"
+          min={0}
+          placeholder="no limit"
+          value={m.minSpeed ?? ''}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            set({ minSpeed: Number.isFinite(v) && v > 0 ? v : undefined });
+          }}
+        />
+      </label>
+      <small className="hint">Slowest a foam face should be cut before the cut gets wide and hourglassed (the slower face on a tapered part). Export warns, but doesn't block.</small>
       <h3>Kerf ({u})</h3>
+      <small className="hint">
+        Kerf is the <b>full width</b> of the slot the wire melts (like a diameter), not one side. The cut path is offset by half of it on each face.
+      </small>
       <SelectField
         label="Kerf"
         value={m.kerfMode ?? 'fixed'}

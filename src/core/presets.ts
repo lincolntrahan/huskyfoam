@@ -26,6 +26,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     segmentOverrides: {},
     dwell: material.cornerDwell ?? { enabled: false, angleDeg: 30, seconds: 0.5 },
     wireWatts: material.wireWatts ?? null,
+    minSpeed: material.minSpeed ?? null,
     cutSpeed: material.cutSpeed,
     sampling: { mode: 'adaptive', step: 0.04, tolerance: 0.001, maxStep: 0.1 },
     cornerSplitDeg: 30,

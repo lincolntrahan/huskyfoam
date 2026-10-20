@@ -135,6 +135,10 @@ Each profile is split into segments at every DXF entity boundary and at sharp co
 
 ### Kerf, speed, dwell and wire power
 
+Kerf is always the **full width** of the slot the wire melts (like a diameter), not one side; the path is offset by half of it on each face. The kerf test works it out as the nominal plug size minus the measured plug side.
+
+A material can set a **minimum feed speed**: if any cut moves a foam face slower than that (usually the slower face of a tapered part), Export warns that the cut may hourglass. It never blocks export.
+
 - **Kerf**: fixed root/tip values, or *Auto from speed*. Auto uses the material's kerf-vs-speed table, so the slower tip automatically gets a wider kerf.
 - **Kerf test** (Material → Edit… → *Kerf test*): downloads G-code that cuts one 1″ square plug at 40/60/80/100% of the cut speed. Measure the plugs, type the sizes in, and *Use these as the kerf table*.
 - **Per-segment kerf / speed**: select a segment in the cut-plan list (or click it on the canvas) and fill in the two fields. Blank = the job value.

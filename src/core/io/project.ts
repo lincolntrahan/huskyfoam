@@ -55,6 +55,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
       job.segmentOverrides ?? Object.fromEntries(Object.entries(legacyKerf ?? {}).map(([k, v]) => [k, { kerf: v }])),
     kerfTable: job.kerfTable ?? d.kerfTable,
     wireWatts: job.wireWatts === undefined ? d.wireWatts : job.wireWatts,
+    minSpeed: job.minSpeed === undefined ? d.minSpeed : job.minSpeed,
     sync: job.sync ?? null,
     contours: { ...d.contours, ...(job.contours ?? {}) },
     plan: job.plan ?? null,
@@ -112,6 +113,7 @@ export function validateMaterial(m: MaterialPreset): string[] {
   if (!(m.cutSpeed > 0)) e.push('Cut speed must be greater than zero.');
   if (!(m.kerfRoot >= 0) || !(m.kerfTip >= 0)) e.push('Kerf cannot be negative.');
   if (m.wireWatts !== undefined && !(m.wireWatts >= 0)) e.push('Wire power cannot be negative.');
+  if (m.minSpeed !== undefined && !(m.minSpeed >= 0)) e.push('Minimum feed speed cannot be negative.');
   if (m.kerfTable?.some((p) => !(p.speed > 0) || !(p.kerf >= 0))) e.push('Kerf table rows need a positive speed and a kerf of 0 or more.');
   return e;
 }
