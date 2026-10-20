@@ -458,6 +458,8 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
   let capped = 0;
   let firstCapped = -1;
   const jogHits = new Set<number>();
+  /** Cut moves where a face goes slower than the material's minimum speed. */
+  const slow = { count: 0, v: Infinity, face: 'root' as 'root' | 'tip', first: -1 };
   /** Index of the last move emitted up to each path point (for placing dwells). */
   const moveAt: number[] = [-1];
   const stepSpeed = (step: number) => {
@@ -485,6 +487,18 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
       capped++;
       if (firstCapped < 0) firstCapped = moves.length;
       minutes = dCar / machine.maxSpeed;
+    }
+    // face speeds on cut moves, for the material's minimum (kerf-corner pivots, where a face holds still, don't count)
+    if (p.speed === 'cut' && p.corner < 0 && minutes > 0 && job.minSpeed) {
+      for (const [face, d] of [['root', dist(p.r, prevFace.r)], ['tip', dist(p.t, prevFace.t)]] as const) {
+        if (d < 1e-4) continue;
+        const v = d / minutes;
+        if (v < job.minSpeed - 1e-9) {
+          slow.count++;
+          if (v < slow.v) Object.assign(slow, { v, face });
+          if (slow.first < 0) slow.first = moves.length;
+        }
+      }
     }
     moves.push({ left: car.left, right: car.right, minutes, lead: p.line, speed: p.speed, step: p.step });
     cutMinutes += minutes;
@@ -527,6 +541,14 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
           break;
         }
       }
+    });
+  }
+
+  if (slow.count && job.minSpeed) {
+    warnings.push({
+      stage: 'path',
+      moveIndex: slow.first,
+      message: `${slow.count} cut move${slow.count === 1 ? '' : 's'} run a foam face slower than the material's minimum feed speed of ${job.minSpeed} ${machine.units}/min (slowest ${slow.v.toFixed(2)} on the ${slow.face} face). Expect hourglassing and loose tolerances there; a higher cut speed or less taper between root and tip helps.`,
     });
   }
 

@@ -196,3 +196,22 @@ describe('preset validation', () => {
     ]);
   });
 });
+
+describe('minimum feed speed', () => {
+  it('warns (without blocking) when a face would be cut slower than the material allows', () => {
+    const fast = run({ minSpeed: 0.2 }); // the lead-out crawls the root face at ~0.38 in/min, so stay under that
+    expect(fast.warnings.map((w) => w.message).join(' ')).not.toMatch(/minimum feed speed/);
+    // the V-tail's slower face drops well below the cut speed on its tapered stretches
+    const strict = run({ minSpeed: material.cutSpeed * 0.95 });
+    const w = strict.warnings.find((x) => /minimum feed speed/.test(x.message));
+    expect(w).toBeDefined();
+    expect(w!.stage).toBe('path');
+    expect(strict.errors).toEqual([]);
+    expect(strict.gcode).toBe(fast.gcode);
+  });
+
+  it('comes from the material', () => {
+    expect(defaultJob(machine, { ...material, minSpeed: 3 }).minSpeed).toBe(3);
+    expect(defaultJob(machine, material).minSpeed).toBeNull();
+  });
+});

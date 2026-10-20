@@ -69,6 +69,11 @@ export interface MaterialPreset {
   cornerDwell?: DwellSettings;
   /** Hot-wire power to set on the cutter's supply, watts. Written as a comment and {wireWatts}. */
   wireWatts?: number;
+  /**
+   * Slowest a foam face should be cut, units/min: below it the cut gets wide and hourglassed.
+   * Only warns. Missing = no limit.
+   */
+  minSpeed?: number;
 }
 
 /** Per-segment overrides (both faces), keyed by segment index in cut order. */
@@ -124,6 +129,8 @@ export interface JobSettings {
   dwell: DwellSettings;
   /** Hot-wire power for this job, watts (from the material); null = not specified. */
   wireWatts: number | null;
+  /** Slowest face speed before the cut gets poor, from the material (warning only); null = none. */
+  minSpeed: number | null;
   /** Cut speed at the faster face, units/min. */
   cutSpeed: number;
   sampling: SamplingSettings;
