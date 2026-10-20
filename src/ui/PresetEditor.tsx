@@ -216,6 +216,10 @@ function KerfTest({ material, machine, onTable }: { material: MaterialPreset; ma
         Needs a block at least {(spec.gap + plugs.length * (spec.nominal + spec.gap)).toFixed(2)} × {(spec.lift + spec.nominal + spec.gap).toFixed(2)} {u}.
       </small>
       <button onClick={() => download(`kerf-test-${slug(material.name)}.nc`, gcode)}>Download test G-code</button>
+      <small className="hint">
+        Speeds are wire speeds. Mach3's feed readout shows the combined speed of all four axes, so on this straight-wire test it reads about 1.41×
+        these numbers (plug 1: about {(plugs[0]?.speed * Math.SQRT2 || 0).toFixed(2)}). The wire is still cutting at the speed listed here.
+      </small>
       <div className="kt-row kt-head">
         <span>Plug (speed)</span>
         <span>Measured ({u})</span>
