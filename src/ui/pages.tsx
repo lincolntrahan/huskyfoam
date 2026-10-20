@@ -5,7 +5,7 @@ import type { CutPlan } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { JobSettings, MachinePreset, MaterialPreset, SegmentOverride } from '../core/types';
 import type { KerfSide } from '../core/cut/contours';
-import { defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
+import { defaultFaceMargin, defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
 import { pairColor } from './DxfPicker';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel, type Pick } from './PlanPanel';
@@ -226,13 +226,13 @@ const ALONG_WIRE = [
 ] as const;
 const ALONG_CHORD = [
   { value: 'center', label: 'Profiles centred' },
-  { value: 'left', label: 'Profiles against the −X side' },
-  { value: 'right', label: 'Profiles against the +X side' },
+  { value: 'left', label: 'Profiles near the −X side (margin)' },
+  { value: 'right', label: 'Profiles near the +X side (margin)' },
 ] as const;
 const VERTICAL = [
   { value: 'middle', label: 'Profiles in the middle' },
-  { value: 'bottom', label: 'Profiles on the bottom face' },
-  { value: 'top', label: 'Profiles against the top face' },
+  { value: 'bottom', label: 'Profiles near the bottom face (margin)' },
+  { value: 'top', label: 'Profiles near the top face (margin)' },
 ] as const;
 
 export function SetupPage(c: PageCtx) {
@@ -332,6 +332,13 @@ export function SetupPage(c: PageCtx) {
         <SelectField label="Along the wire" value={L.alongWire} options={[...ALONG_WIRE]} onChange={(v) => setL({ alongWire: v as AlignH })} />
         <SelectField label="Along the chord" value={L.alongChord} options={[...ALONG_CHORD]} onChange={(v) => setL({ alongChord: v as AlignH })} />
         <SelectField label="Vertical" value={L.vertical} options={[...VERTICAL]} onChange={(v) => setL({ vertical: v as AlignV })} />
+        <NumberField
+          label="Margin to block face"
+          value={L.faceMargin ?? defaultFaceMargin(machine)}
+          min={0}
+          onChange={(v) => setL({ faceMargin: v })}
+          hint="Foam left between the profiles and the top or bottom face, or the −X / +X side, when they're set near it (not along the wire)"
+        />
         <button disabled={!outlines.length} onClick={() => setL({ block: fitBlockSize(placed, outlines, u === 'mm' ? 5 : 0.2) })}>
           Fit block to profiles
         </button>

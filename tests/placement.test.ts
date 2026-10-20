@@ -95,18 +95,23 @@ describe('block around the profiles', () => {
   it('centres, or puts the profiles against a side, along the chord', () => {
     const c = box(job({ block, alongChord: 'center' }));
     expect(c.b.x + c.b.w / 2).toBeCloseTo((c.x0 + c.x1) / 2, 9);
+    // against a side: the default 0.1 in margin from it
     const l = box(job({ block, alongChord: 'left' }));
-    expect(l.b.x).toBeCloseTo(l.x0, 9);
+    expect(l.b.x).toBeCloseTo(l.x0 - 0.1, 9);
     const r = box(job({ block, alongChord: 'right' }));
-    expect(r.b.x + r.b.w).toBeCloseTo(r.x1, 9);
+    expect(r.b.x + r.b.w).toBeCloseTo(r.x1 + 0.1, 9);
+    const flush = box(job({ block, alongChord: 'left', faceMargin: 0 }));
+    expect(flush.b.x).toBeCloseTo(flush.x0, 9);
   });
 
   it('centres, or puts the profiles on the bottom or top face, vertically', () => {
     const m = box(job({ block, vertical: 'middle', floor: 1.5 })); // high enough that a centred block clears the floor
     expect(m.b.y + m.b.h / 2).toBeCloseTo((m.y0 + m.y1) / 2, 9);
-    expect(box(job({ block, vertical: 'bottom' })).b.y).toBeCloseTo(0.5, 9);
+    expect(box(job({ block, vertical: 'bottom' })).b.y).toBeCloseTo(0.5 - 0.1, 9); // the margin under the profiles
     const t = box(job({ block, vertical: 'top', floor: 1.5 }));
-    expect(t.b.y + t.b.h).toBeCloseTo(t.y1, 9);
+    expect(t.b.y + t.b.h).toBeCloseTo(t.y1 + 0.1, 9);
+    const t2 = box(job({ block, vertical: 'top', floor: 1.5, faceMargin: 0.25 }));
+    expect(t2.b.y + t2.b.h).toBeCloseTo(t2.y1 + 0.25, 9);
   });
 
   it('has no block when its size is not set', () => {
@@ -169,7 +174,7 @@ describe('block and the floor', () => {
     const res = generateCut(root, tip, p.job, machine);
     const top = Math.max(...[...res.profilePts.root, ...res.profilePts.tip].map((q) => q.y));
     expect(p.job.block.y).toBeCloseTo(0, 9);
-    expect(top).toBeCloseTo(3, 9);
+    expect(top).toBeCloseTo(3 - 0.1, 9); // the margin below the top face
   });
 
   it('leaves a block that fits alone', () => {
