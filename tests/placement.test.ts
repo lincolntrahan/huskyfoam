@@ -181,3 +181,43 @@ describe('block and the floor', () => {
     expect(placeLayout(job({ floor: 0.25, block: { w: 12, h: 2, len: 0 }, vertical: 'bottom' }), root, tip, machine).liftedTo).toBeNull();
   });
 });
+
+describe('setback from X = 0', () => {
+  // no taper: the same profile at both ends, so the carriages trace the profile exactly
+  const straight = (layout: Partial<JobSettings['layout'] & object>) => {
+    const j = job(layout);
+    return { j, p: placeJob(j, root, root, machine) };
+  };
+  const frontOf = (j: JobSettings) => {
+    const res = generateCut(root, root, j, machine);
+    return Math.min(...res.profilePts.root.map((q) => q.x));
+  };
+
+  it('puts the profiles’ front the setback (default 1 in) from X = 0 when there is no block', () => {
+    const { p } = straight({});
+    expect(frontOf(p)).toBeCloseTo(1, 9);
+  });
+
+  it('puts the block’s front face there when a block is set, with the profiles inside it', () => {
+    const { p } = straight({ block: { w: 14, h: 2, len: 0 }, alongChord: 'center', floor: 1 });
+    expect(p.block.x).toBeCloseTo(1, 9);
+    expect(frontOf(p)).toBeGreaterThan(1);
+  });
+
+  it('follows the setting', () => {
+    // with no setback the kerf in front of the profile is what reaches X = 0
+    const zero = straight({ setback: 0 }).p;
+    const cut = generateCut(root, root, zero, machine).moves.filter((m) => !m.lead).flatMap((m) => [m.left.x, m.right.x]);
+    expect(Math.min(...cut)).toBeCloseTo(0, 9);
+    expect(frontOf(zero)).toBeLessThan(0.1);
+    expect(frontOf(straight({ setback: 2.5 }).p)).toBeCloseTo(2.5, 9);
+  });
+
+  it('moves further back when a carriage would otherwise pass X = 0 (swept part)', () => {
+    const p = place(job({ block: { w: 14, h: 2, len: 0 }, floor: 1 }));
+    const res = generateCut(root, tip, p, machine);
+    const cutXs = res.moves.filter((m) => !m.lead).flatMap((m) => [m.left.x, m.right.x]);
+    expect(Math.min(...cutXs)).toBeGreaterThan(-1e-9);
+    expect(p.block.x).toBeGreaterThanOrEqual(1 - 1e-9);
+  });
+});

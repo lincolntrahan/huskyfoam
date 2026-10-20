@@ -5,7 +5,7 @@ import type { CutPlan } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { JobSettings, MachinePreset, MaterialPreset, SegmentOverride } from '../core/types';
 import type { KerfSide } from '../core/cut/contours';
-import { defaultFaceMargin, defaultLayout, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
+import { defaultFaceMargin, defaultLayout, defaultSetback, fitBlockSize, type AlignH, type AlignV, type Layout } from '../core/cut/placement';
 import { pairColor } from './DxfPicker';
 import { NumberField, SelectField } from './Fields';
 import { PlanPanel, type Pick } from './PlanPanel';
@@ -314,7 +314,8 @@ export function SetupPage(c: PageCtx) {
           </div>
         )}
         <small className="hint">
-          The part is pushed toward X = {machine.travel.x[0]} until a carriage would pass it: part offset ({r3(placed.offset.x)}, {r3(placed.offset.y)}).
+          The block's front sits the setback from X = {machine.travel.x[0]} (further back if a carriage would pass X = {machine.travel.x[0]}): part offset (
+          {r3(placed.offset.x)}, {r3(placed.offset.y)}).
         </small>
       </section>
 
@@ -332,6 +333,13 @@ export function SetupPage(c: PageCtx) {
         <SelectField label="Along the wire" value={L.alongWire} options={[...ALONG_WIRE]} onChange={(v) => setL({ alongWire: v as AlignH })} />
         <SelectField label="Along the chord" value={L.alongChord} options={[...ALONG_CHORD]} onChange={(v) => setL({ alongChord: v as AlignH })} />
         <SelectField label="Vertical" value={L.vertical} options={[...VERTICAL]} onChange={(v) => setL({ vertical: v as AlignV })} />
+        <NumberField
+          label="Setback from X = 0"
+          value={L.setback ?? defaultSetback(machine)}
+          min={0}
+          onChange={(v) => setL({ setback: v })}
+          hint="Gap between X = 0 and the block's front face (the profiles' front with no block), so the jogs up from home clear the foam"
+        />
         <NumberField
           label="Margin to block face"
           value={L.faceMargin ?? defaultFaceMargin(machine)}

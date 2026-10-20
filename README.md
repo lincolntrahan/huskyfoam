@@ -51,7 +51,7 @@ You only arrange the profiles relative to each other (on *Arrange Profiles*). Wh
 
 - **Along the wire**: measure from **either** carriage to its profile. Typing the left gap fills in the right one (right = carriage spacing − profile distance − left), and the other way round. **Root profile on** picks which carriage cuts the root DXF.
 - **Height above floor**: the lowest point of either profile sits this far above Y = 0. The default is 0.25 in. On a part with a steep slope between the profiles the carriages go lower than the profiles; if they would pass the machine's Y travel limit, the profiles are raised just enough to keep them in, and the page says how high they ended up.
-- **X**: the part is pushed toward X = 0 as far as it can go without any carriage move going past the machine's travel limit.
+- **X**: the block's front face (or the profiles' front, with no block) sits the **setback** (default 1 in) from X = 0, so the vertical jogs up from home clear the foam. A swept or tapered part goes further back if a carriage would otherwise pass the X travel limit.
 - **Foam block**: its width (along the chord), height and length (along the wire). Three dropdowns place it around the profiles:
   - along the wire: profiles centred, or the left/right profile on that block face;
   - along the chord: profiles centred, or against the −X or +X side;
@@ -134,6 +134,8 @@ Jogs are sent as coordinated `G1` moves at the machine's jog speed. You get a wa
 Each profile is split into segments at every DXF entity boundary and at sharp corners. Segment *N* on the root is cut together with segment *N* on the tip. Both profiles therefore need the same number of segments. The easiest way to get that is to draw root and tip with the same entities (e.g. 2 splines + tab lines), as in the example.
 
 ### Kerf, speed, dwell and wire power
+
+In *Auto from speed table* mode, speeds between two table rows get a kerf interpolated linearly between them.
 
 Kerf is always the **full width** of the slot the wire melts (like a diameter), not one side; the path is offset by half of it on each face. The kerf test works it out as the nominal plug size minus the measured plug side.
 

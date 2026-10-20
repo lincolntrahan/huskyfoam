@@ -323,6 +323,10 @@ export function MaterialEditor(props: {
       <NumberField label="Root kerf (fixed mode)" value={m.kerfRoot} onChange={(v) => set({ kerfRoot: v })} />
       <NumberField label="Tip kerf (fixed mode)" value={m.kerfTip} onChange={(v) => set({ kerfTip: v })} />
       <h3>Kerf vs. speed (auto mode)</h3>
+      <small className="hint">
+        Used when Kerf is <i>Auto from speed table</i>. Speeds between two rows get a kerf interpolated linearly between them; speeds outside the table
+        use the nearest row (and Preview warns).
+      </small>
       <KerfTableEditor rows={m.kerfTable ?? []} units={u} onChange={(rows) => set({ kerfTable: rows })} />
       <details>
         <summary>Kerf test (fills the table)</summary>
