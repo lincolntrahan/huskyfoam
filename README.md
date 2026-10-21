@@ -71,6 +71,8 @@ The **2D / 3D** switch above the canvas works on every page, and *Preview Cut Pa
 - the wire
 - both carriage paths
 
+On *Export G-Code*, dimension lines show where to set the block: left carriage to its left face, its right face to the right carriage, and X = 0 to its front face.
+
 Each has a checkbox. **▶** plays the cut at 1–100×, and the slider scrubs. Drag to orbit, right-drag to pan, scroll to zoom.
 
 ### Sync points (splits)

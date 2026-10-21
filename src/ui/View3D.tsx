@@ -1,4 +1,4 @@
-import { Line, OrbitControls } from '@react-three/drei';
+import { Html, Line, OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -65,9 +65,45 @@ interface SceneProps {
   speed: number;
   onTime: (t: number) => void;
   total: number;
+  /** Show where to set the block (Export). */
+  dims?: boolean;
 }
 
-function Scene({ result, job, machine, filters, time, playing, speed, onTime, total }: SceneProps) {
+/**
+ * Where to set the block, as dimension lines along its bottom front edge: left carriage to the
+ * block's left face, right carriage to its right face, and X = 0 to its front face.
+ */
+function BlockDims({ job, machine, D, color }: { job: JobSettings; machine: MachinePreset; D: number; color: string }) {
+  const b = job.block;
+  const za = Math.min(job.rootFaceFromLeft, job.rootFaceFromLeft + job.span);
+  const zb = Math.max(job.rootFaceFromLeft, job.rootFaceFromLeft + job.span);
+  const x0 = machine.travel.x[0];
+  const y = b.y;
+  const u = machine.units;
+  const tick = Math.max(b.h, 0.5) * 0.35;
+  const fmt = (v: number) => `${(Math.round(v * 1000) / 1000).toFixed(3)} ${u}`;
+  const V = (x: number, yy: number, z: number) => new THREE.Vector3(x, yy, z);
+  /** A dimension: the line, a tick at each end, and a label in the middle. */
+  const dim = (key: string, a: THREE.Vector3, c: THREE.Vector3, label: string) => (
+    <group key={key}>
+      <Line points={[a, c]} color={color} lineWidth={2} />
+      <Line points={[V(a.x, a.y - tick / 2, a.z), V(a.x, a.y + tick / 2, a.z)]} color={color} lineWidth={2} />
+      <Line points={[V(c.x, c.y - tick / 2, c.z), V(c.x, c.y + tick / 2, c.z)]} color={color} lineWidth={2} />
+      <Html position={a.clone().add(c).multiplyScalar(0.5)} center zIndexRange={[10, 0]}>
+        <div className="dim3d">{label}</div>
+      </Html>
+    </group>
+  );
+  return (
+    <group>
+      {dim('left', V(b.x, y, 0), V(b.x, y, za), `Left carriage → block: ${fmt(za)}`)}
+      {dim('right', V(b.x, y, zb), V(b.x, y, D), `Block → right carriage: ${fmt(D - zb)}`)}
+      {dim('front', V(x0, y, (za + zb) / 2), V(b.x, y, (za + zb) / 2), `X = ${x0} → block front: ${fmt(b.x - x0)}`)}
+    </group>
+  );
+}
+
+function Scene({ result, job, machine, filters, time, playing, speed, onTime, total, dims }: SceneProps) {
   const D = machine.carriageSpacing;
   const colors = useMemo(
     () => ({
@@ -77,6 +113,7 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
       tipcar: cssColor('--tipcar', '#b84dff'),
       cut: cssColor('--cut', '#ffd400'),
       muted: cssColor('--muted', '#b4b4bc'),
+      text: cssColor('--text', '#ffffff'),
       block: cssColor('--block-edge', '#ff9100'),
     }),
     [],
@@ -169,6 +206,7 @@ function Scene({ result, job, machine, filters, time, playing, speed, onTime, to
           <meshStandardMaterial color={colors.block} transparent opacity={0.12} depthWrite={false} />
         </mesh>
       )}
+      {dims && filters.block && hasBlock && <BlockDims job={job} machine={machine} D={D} color={colors.text} />}
       {filters.block && hasBlock && (
         <lineSegments position={[job.block.x + job.block.w / 2, job.block.y + job.block.h / 2, (zb0 + zb1) / 2]}>
           <edgesGeometry args={[new THREE.BoxGeometry(job.block.w, job.block.h, Math.abs(zb1 - zb0))]} />
@@ -263,7 +301,18 @@ export default function View3D(props: { result: CutResult | null; job: JobSettin
   return (
     <div className="canvas-wrap view3d">
       <Canvas camera={{ position: [center[0] + size * 0.75, center[1] + size * 0.55, center[2] - size * 1.0], fov: 40, near: size / 1000, far: size * 50 }}>
-        <Scene result={result} job={job} machine={machine} filters={filters} time={canPlay ? time : total} playing={canPlay && playing} speed={speed} onTime={setTime} total={total} />
+        <Scene
+          result={result}
+          job={job}
+          machine={machine}
+          filters={filters}
+          time={canPlay ? time : total}
+          playing={canPlay && playing}
+          speed={speed}
+          onTime={setTime}
+          total={total}
+          dims={props.mode === 'export'}
+        />
         <OrbitControls makeDefault target={center} />
       </Canvas>
 
