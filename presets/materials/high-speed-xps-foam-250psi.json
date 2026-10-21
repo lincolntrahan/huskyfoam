@@ -1,0 +1,34 @@
+{
+  "id": "high-speed-xps-foam-250psi",
+  "name": "High Speed XPS Foam 250psi",
+  "units": "in",
+  "cutSpeed": 18,
+  "kerfRoot": 0.1,
+  "kerfTip": 0.1116,
+  "wireWatts": 60,
+  "cornerDwell": {
+    "enabled": true,
+    "angleDeg": 45,
+    "seconds": 0.5
+  },
+  "kerfMode": "auto",
+  "kerfTable": [
+    {
+      "speed": 7.2,
+      "kerf": 0.073
+    },
+    {
+      "speed": 10.8,
+      "kerf": 0.042
+    },
+    {
+      "speed": 14.4,
+      "kerf": 0.039
+    },
+    {
+      "speed": 18,
+      "kerf": 0.035
+    }
+  ],
+  "minSpeed": 7.2
+}
