@@ -81,6 +81,7 @@ Splits are where root and tip are matched (segment N on the root is cut with seg
 
 - **Click a profile outline** to *add a split*. The matching one is added on the other profile at the same relative position.
 - **Drag** a split marker to slide it. Splits are **linked**: the partner on the other profile moves to the same relative position (the same fraction of the stretch between its neighbouring splits).
+- On *Sequence Cuts*, clicking a contour on the canvas selects its pair: its chip under Templates lights up.
 - **Click a split** for *Unlink* (it then moves on its own profile only, and gets a dashed ring), *Link again* (snaps the partner to match), *Make contour start* or *Remove split* (removes the pair).
 - **Profiles split differently** (e.g. the root and tip drawn from different entities, so the error says "Root has 16 segments but tip has 19"): the split menus switch to one profile at a time. Click an extra split and choose *Remove split (tip only)* (or click a profile to *Add split here (root only)*) until the counts match.
 - *Reset splits to automatic* undoes all of it.

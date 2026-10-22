@@ -337,7 +337,7 @@ export function PlanPanel(props: Props) {
         <small className="hint">Pick a contour pair (here or by clicking it on the canvas), then a template. Its steps go in a folder for that pair.</small>
         <div className="pair-chips">
           {pairs.map((_, i) => (
-            <button key={i} className={props.pair === i ? 'active' : ''} onClick={() => props.onPair(props.pair === i ? null : i)}>
+            <button key={i} className={props.pair === i ? 'active' : ''} aria-pressed={props.pair === i} onClick={() => props.onPair(props.pair === i ? null : i)}>
               <span className="swatch" style={{ background: pairColor(i, 'var(--root)') }} />
               {i === 0 ? 'Outline' : `Pair ${i + 1}`} {groupOfPair(i) ? '✓' : ''}
             </button>
