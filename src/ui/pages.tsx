@@ -504,6 +504,10 @@ export function SegmentPage(c: PageCtx) {
           matching one is added on the other profile), drag a marker to slide it, click a marker for more options. Splits are linked: dragging one moves
           its partner to the same relative position. Unlink one from its menu to move it on one profile only (it gets a dashed ring).
         </small>
+        <small className="hint">
+          If the two profiles get different numbers of splits (they're drawn from different entities), splits are added and removed one profile at a
+          time until the counts match: click an extra split and choose <i>Remove split (that profile only)</i>.
+        </small>
         <small className="hint">{hand ? 'Splits are edited by hand.' : 'Splits are automatic (entity boundaries + sharp corners).'}</small>
         <button
           disabled={!hand}

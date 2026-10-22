@@ -498,6 +498,7 @@ export function App() {
                 setPick(p);
               }}
               plan={plan}
+              storedPlan={job.plan}
               onPlanChange={(p) => patch({ plan: p })}
               outBackDistance={outBack}
               onSyncChange={onSyncChange}

@@ -9,7 +9,7 @@ import { loadDxfProfile } from '../src/core/io/loadProfile';
 import { leTePlan, loopPlan } from '../src/core/plan/templates';
 import { remapRemove } from '../src/core/plan/remap';
 import { defaultJob, materials } from '../src/core/presets';
-import { addPin, addSplit, movePin, moveSplit, removeSplit, setLoopStart, setPinLinked, setSplitLinked } from '../src/core/sync/edit';
+import { addPin, addSplit, addSplitOn, mismatched, movePin, moveSplit, removeSplit, removeSplitOn, setLoopStart, setPinLinked, setSplitLinked } from '../src/core/sync/edit';
 import { autoSync, locate } from '../src/core/sync/sync';
 import type { JobSettings } from '../src/core/types';
 
@@ -218,5 +218,48 @@ describe('linked splits and pins', () => {
     const res = run({ sync: free, transforms: { ...vtailJob().transforms, flipH: true } });
     expect(res.sync!.linked!.filter((x) => !x)).toHaveLength(1);
     expect(res.syncToJob!(res.sync!).linked).toEqual(free.linked);
+  });
+});
+
+describe('profiles split differently', () => {
+  // an extra split on the tip only: 8 root splits, 9 tip splits
+  const extra = addSplitOn(auto, null, arcs, 'tip', (auto.tip[1] + auto.tip[2]) / 2)!;
+
+  it('adds and removes splits on one profile only', () => {
+    expect(extra.sync.root).toEqual(auto.root);
+    expect(extra.sync.tip).toHaveLength(auto.tip.length + 1);
+    expect(mismatched(extra.sync)).toBe(true);
+    const fixed = removeSplitOn(extra.sync, null, 'tip', 2, undefined, arcs)!;
+    expect(fixed.sync.tip).toEqual(auto.tip);
+    expect(mismatched(fixed.sync)).toBe(false);
+  });
+
+  it('can be fixed from the error by removing the extra split', () => {
+    const bad = run({ sync: extra.sync });
+    expect(bad.errors[0]).toMatch(/Root has 8 segments but tip has 9/);
+    // the split markers are still there per side, so they can be edited
+    expect(bad.splitPts.root).toHaveLength(8);
+    expect(bad.splitPts.tip).toHaveLength(9);
+    const fixed = removeSplitOn(bad.pairs![0].sync, null, 'tip', 2, undefined, bad.pairs![0].arcs)!;
+    const good = run({ sync: bad.pairs![0].syncToJob(fixed.sync) });
+    expect(good.errors).toEqual([]);
+  });
+
+  it('drags a split on its own while the counts differ', () => {
+    const s = (extra.sync.tip[1] + extra.sync.tip[2]) / 2;
+    const moved = moveSplit(extra.sync, null, arcs, 'tip', 2, s - 0.01)!;
+    expect(moved.sync.root).toEqual(extra.sync.root);
+  });
+
+  it('renumbers the plan when a root split goes', () => {
+    const r = addSplitOn(auto, loopPlan(8), arcs, 'root', (auto.root[1] + auto.root[2]) / 2)!;
+    expect(r.sync.root).toHaveLength(9);
+    expect(r.change).toEqual({ kind: 'insert', k: 1 });
+    const back = removeSplitOn(r.sync, r.plan, 'root', 2, undefined, arcs)!;
+    expect(back.sync.root).toEqual(auto.root);
+    expect(back.plan).not.toBeNull();
+    const res = run({ sync: back.sync, plan: back.plan });
+    expect(res.errors).toEqual([]);
+    expect(res.stats.segments).toBe(8);
   });
 });
