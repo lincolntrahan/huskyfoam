@@ -69,7 +69,8 @@ export function moveSplit(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, 
   const next = n > 1 ? list[(i + 1) % n] : list[i];
   if (n > 1 && !withinS(arcs[side], prev, next, s)) return null;
   const out = { ...sync, [side]: list.map((v, j) => (j === i ? wrapS(arcs[side], s) : v)) } as SyncSettings;
-  if (isLinked(sync, i)) {
+  // with different split counts on the two profiles there's no partner to follow
+  if (isLinked(sync, i) && !mismatched(sync)) {
     const o = other(side);
     const ol = sync[o];
     const oPrev = n > 1 ? ol[(i - 1 + n) % n] : ol[i];
@@ -110,6 +111,48 @@ export function removeSplit(sync: SyncSettings, plan: CutPlan | null, i: number,
     // with several contours the default plan rebuilds itself from the new splits
     plan: ctx ? null : loopPlan(n - 1),
     note: `Removing split ${split0 + i + 1} broke the custom cut plan (it used that split or one of its segments on its own), so the plan was reset to the default.`,
+  };
+}
+
+/**
+ * The two profiles have different numbers of splits (they were split differently, e.g. from
+ * different entities). Until they match, splits are added and removed one profile at a time.
+ */
+export const mismatched = (sync: SyncSettings) => sync.root.length !== sync.tip.length;
+
+// The plan numbers splits and segments by the root, so only root edits renumber it.
+
+/** Add a split at arc position s on one profile only (to even out mismatched split counts). */
+export function addSplitOn(sync: SyncSettings, plan: CutPlan | null, arcs: Arcs, side: Side, s: number, ctx?: PairCtx): SyncEdit | null {
+  const at = locate(arcs[side], sync[side], s);
+  if (!at) return null; // on top of an existing split
+  const list = sync[side];
+  const next = { ...sync, [side]: [...list.slice(0, at.k + 1), wrapS(arcs[side], s), ...list.slice(at.k + 1)] } as SyncSettings;
+  if (side === 'tip') return { sync: next, plan };
+  if (sync.linked) next.linked = [...sync.linked.slice(0, at.k + 1), true, ...sync.linked.slice(at.k + 1)];
+  const { topo, seg0 } = ctxOf(sync, ctx);
+  const g = seg0 + at.k;
+  return { sync: next, plan: plan && remapInsert(plan, g, topo), change: { kind: 'insert', k: g } };
+}
+
+/** Remove split i from one profile only (to even out mismatched split counts). */
+export function removeSplitOn(sync: SyncSettings, plan: CutPlan | null, side: Side, i: number, ctx?: PairCtx, arcs?: Arcs): SyncEdit | null {
+  const n = sync[side].length;
+  if (n < 2 || (arcs && isEnd(arcs, n, i))) return null;
+  const next = { ...sync, [side]: sync[side].filter((_, j) => j !== i) } as SyncSettings;
+  if (side === 'tip') return { sync: next, plan };
+  if (sync.linked) next.linked = sync.linked.filter((_, j) => j !== i);
+  const { topo, split0 } = ctxOf(sync, ctx);
+  const at = segmentsAtSplit(topo, split0 + i);
+  const change: SegmentChange | undefined = at ? { kind: 'remove', i: at.after, n } : undefined;
+  if (!plan) return { sync: next, plan, change };
+  const remapped = at ? remapRemove(plan, split0 + i, topo) : null;
+  if (remapped) return { sync: next, plan: remapped, change };
+  return {
+    sync: next,
+    plan: null,
+    change,
+    note: `Removing root split ${split0 + i + 1} broke the custom cut plan (it used that split or one of its segments on its own), so the plan was reset.`,
   };
 }
 

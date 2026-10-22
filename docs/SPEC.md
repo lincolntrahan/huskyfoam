@@ -411,6 +411,7 @@ Libraries:
 - Import: per-profile rotation in 90° steps (`job.rotation`, applied to the DXF geometry on load, exact). Contours are numbered and coloured by pair on both pickers; the pairing table moves to Import, the kerf-side table stays on Segment.
 - Auto pairing: with equal counts of closed (and of open) inner contours, pair by order along the outline's long axis (then across it); otherwise by nearest normalised position.
 - Splits are linked unless `sync.linked[k] === false`; unlinked splits get a dashed ring. Pins are no longer offered (old projects keep theirs and can remove them).
+- While a pair has different split counts on root and tip, the pipeline stops at the segment stage but still reports each side's splits; the canvas then offers one-sided `addSplitOn` / `removeSplitOn` (root edits renumber the plan, tip edits don't) and dragging a split no longer moves a partner. Sync edits carry the job's stored plan, since an errored result has none.
 
 **M2f — Sequencing redesign** ✅ done (PR #14)
 

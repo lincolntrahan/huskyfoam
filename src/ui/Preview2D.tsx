@@ -4,10 +4,10 @@ import { nearestS } from '../core/geom/arc';
 import type { Profile } from '../core/geom/profile';
 import { add, normalize, perpR, scale, sub, type Vec2 } from '../core/geom/vec';
 import { insertOutAndBack, insertPointOnLine, insertRunOut, removeStep, reverseStep, setPoint, setSpeed } from '../core/plan/edit';
-import type { CutPlan, PlanPoint } from '../core/plan/model';
+import { makeTopology, type CutPlan, type PlanPoint } from '../core/plan/model';
 import type { Rect } from '../core/plan/templates';
 import type { PathPt } from '../core/plan/walk';
-import { addSplit, movePin, moveSplit, removePin, removeSplit, setLoopStart, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
+import { addSplit, addSplitOn, mismatched, movePin, moveSplit, removePin, removeSplit, removeSplitOn, setLoopStart, setSplitLinked, type Side, type SyncEdit } from '../core/sync/edit';
 import { isLinked, locate } from '../core/sync/sync';
 import { pairColor } from './DxfPicker';
 import { stepPair } from '../core/plan/tree';
@@ -35,6 +35,8 @@ interface Props {
   layers: Layers;
   block: Rect;
   plan: CutPlan | null;
+  /** The job's saved plan: split edits carry it along while the cut has errors (and no plan of its own). */
+  storedPlan?: CutPlan | null;
   onPlanChange: (p: CutPlan) => void;
   outBackDistance: number;
   selectedStep: number | null;
@@ -153,6 +155,7 @@ function Outline(props: {
 
 export function Preview2D(props: Props) {
   const { root, tip, offset, result, machine, layers, block, plan, onPlanChange } = props;
+  const syncPlan = plan ?? props.storedPlan ?? null;
   const showR = props.sides !== 'tip';
   const showT = props.sides !== 'root';
   // The root face is driven by the carriage on its side.
@@ -284,10 +287,18 @@ export function Preview2D(props: Props) {
 
   const unit = Math.max(vb.w, vb.h) / 100; // ~1% of the view, for marker and label sizes
   const splitPos = (side: Side, k: number): Vec2 | null => result?.splitPts[side][k] ?? null;
-  /** Pair and local index of global split k. */
-  const splitAt = (k: number) => {
-    const p = pairs.findIndex((pr) => k >= pr.split0 && k < pr.split0 + pr.sync.root.length);
-    return p < 0 ? null : { p, j: k - pairs[p].split0, pr: pairs[p] };
+  /**
+   * Pair and local index of split k on one side. Splits are numbered per side, so this still
+   * works while the two profiles have different split counts.
+   */
+  const splitAt = (k: number, side: Side) => {
+    let first = 0;
+    for (const [p, pr] of pairs.entries()) {
+      const n = pr.sync[side].length;
+      if (k < first + n) return { p, j: k - first, pr };
+      first += n;
+    }
+    return null;
   };
   /** Pair and local index of global pin i. */
   const pinAt = (i: number) => {
@@ -296,7 +307,9 @@ export function Preview2D(props: Props) {
     const before = pairs.slice(0, p).reduce((a, pr) => a + pr.sync.pins.length, 0);
     return { p, j: i - before, pr: pairs[p] };
   };
-  const ctxFor = (p: number) => (result?.topology ? { topo: result.topology, pair: p } : undefined);
+  // without a result topology (split counts don't match yet), number by the root, as the plan does
+  const ctxFor = (p: number) =>
+    pairs.length ? { topo: result?.topology ?? makeTopology(pairs.map((pr) => ({ closed: pr.closed, splits: pr.sync.root.length }))), pair: p } : undefined;
   const syncEdit = (p: number, ed: SyncEdit | null) => {
     if (ed) props.onSyncChange({ ...ed, pair: p });
   };
@@ -305,7 +318,7 @@ export function Preview2D(props: Props) {
 
   const outAndBackAt = (k: number) => {
     if (!plan || !result) return;
-    const at = splitAt(k);
+    const at = splitAt(k, 'root');
     if (!at) return;
     const { pr, j } = at;
     const outward = (side: 'r' | 't'): { from: Vec2; dir: Vec2 } => {
@@ -344,7 +357,7 @@ export function Preview2D(props: Props) {
     result?.splitPts[side].map((p, k) => {
       const x = p.x;
       const y = -p.y;
-      const at = splitAt(k);
+      const at = splitAt(k, side);
       // each contour's first split is its start
       const first = at?.j === 0;
       const linked = at ? isLinked(at.pr.sync, at.j) : true;
@@ -438,7 +451,7 @@ export function Preview2D(props: Props) {
     (['root', 'tip'] as Side[]).forEach((side) => {
       if (side === 'root' ? !showR : !showT) return;
       const color = side === 'root' ? 'var(--root)' : 'var(--tip)';
-      result.splitPts[side].forEach((p, k) => labels.push({ key: `s-${side}-${k}`, x: p.x, y: -p.y, text: splitAt(k)?.j === 0 ? `${k + 1} start` : String(k + 1), color, prio: splitAt(k)?.j === 0 ? 0 : 2 }));
+      result.splitPts[side].forEach((p, k) => labels.push({ key: `s-${side}-${k}`, x: p.x, y: -p.y, text: splitAt(k, side)?.j === 0 ? `${k + 1} start` : String(k + 1), color, prio: splitAt(k, side)?.j === 0 ? 0 : 2 }));
       if (edit.sync) result.pinPts[side].forEach((p, i) => labels.push({ key: `p-${side}-${i}`, x: p.x, y: -p.y, text: `P${i + 1}`, color: 'var(--pin)', prio: 1 }));
     });
   }
@@ -561,11 +574,11 @@ export function Preview2D(props: Props) {
             if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
             sd.moved = true;
             if (drawing || !edit.sync) return;
-            const at = sd.kind === 'split' ? splitAt(sd.i) : pinAt(sd.i);
+            const at = sd.kind === 'split' ? splitAt(sd.i, sd.side) : pinAt(sd.i);
             if (!at) return;
             const sNew = sOnProfile(sd.side, toWorld(e.clientX, e.clientY), at.p);
-            if (sd.kind === 'split') syncEdit(at.p, moveSplit(at.pr.sync, plan, at.pr.arcs, sd.side, at.j, sNew));
-            else syncEdit(at.p, { sync: movePin(at.pr.sync, at.pr.arcs, at.j, sd.side, sNew), plan });
+            if (sd.kind === 'split') syncEdit(at.p, moveSplit(at.pr.sync, syncPlan, at.pr.arcs, sd.side, at.j, sNew));
+            else syncEdit(at.p, { sync: movePin(at.pr.sync, at.pr.arcs, at.j, sd.side, sNew), plan: syncPlan });
             return;
           }
           const pd = pointDrag.current;
@@ -817,7 +830,7 @@ export function Preview2D(props: Props) {
       {props.pick === 'jog' && <div className="banner">Click a split marker to jog to it (over the block). Esc to cancel.</div>}
       {props.pick === 'segment' && <div className="banner">Click a profile segment to add it, forward. Esc to cancel.</div>}
 
-      {menu && plan && (
+      {menu && (plan || menu.kind === 'split' || menu.kind === 'profile' || menu.kind === 'pin') && (
         <div className="popover" style={{ left: menu.sx, top: menu.sy }} onPointerDown={(e) => e.stopPropagation()}>
           {menu.kind === 'split' ? (
             <>
@@ -826,19 +839,34 @@ export function Preview2D(props: Props) {
               {edit.plan && menuItem(`Out-and-back here (${props.outBackDistance} ${machine.units})`, () => outAndBackAt(menu.k))}
               {edit.sync &&
                 (() => {
-                  const at = splitAt(menu.k);
+                  const at = splitAt(menu.k, menu.side);
                   if (!at) return null;
                   const { p, j, pr } = at;
                   const linked = isLinked(pr.sync, j);
-                  const end = !pr.closed && (j === 0 || j === pr.sync.root.length - 1);
+                  const end = !pr.closed && (j === 0 || j === pr.sync[menu.side].length - 1);
+                  if (mismatched(pr.sync)) {
+                    const mine = pr.sync[menu.side].length;
+                    const theirs = pr.sync[menu.side === 'root' ? 'tip' : 'root'].length;
+                    return (
+                      <>
+                        <div className="popover-note">
+                          The {menu.side} has {mine} splits and the {menu.side === 'root' ? 'tip' : 'root'} has {theirs}: remove (or add) splits one profile at a
+                          time until they match.
+                        </div>
+                        {!end &&
+                          mine > 1 &&
+                          menuItem(`Remove split (${menu.side} only)`, () => syncEdit(p, removeSplitOn(pr.sync, syncPlan, menu.side, j, ctxFor(p), pr.arcs)))}
+                      </>
+                    );
+                  }
                   return (
                     <>
                       {!end &&
                         menuItem(linked ? 'Unlink (move on this profile only)' : 'Link again (snaps the other profile to match)', () =>
-                          syncEdit(p, { sync: setSplitLinked(pr.sync, pr.arcs, menu.side, j, !linked), plan }),
+                          syncEdit(p, { sync: setSplitLinked(pr.sync, pr.arcs, menu.side, j, !linked), plan: syncPlan }),
                         )}
-                      {pr.closed && j !== 0 && menuItem('Make contour start', () => syncEdit(p, setLoopStart(pr.sync, plan, j, ctxFor(p))))}
-                      {!end && pr.sync.root.length > 1 && menuItem('Remove split (both profiles)', () => syncEdit(p, removeSplit(pr.sync, plan, j, ctxFor(p), pr.arcs)))}
+                      {pr.closed && j !== 0 && menuItem('Make contour start', () => syncEdit(p, setLoopStart(pr.sync, syncPlan, j, ctxFor(p))))}
+                      {!end && pr.sync.root.length > 1 && menuItem('Remove split (both profiles)', () => syncEdit(p, removeSplit(pr.sync, syncPlan, j, ctxFor(p), pr.arcs)))}
                     </>
                   );
                 })()}
@@ -852,9 +880,17 @@ export function Preview2D(props: Props) {
               {edit.chord && menuItem(`Use as ${menu.side} TE here (twist pivot)`, () => props.onChordPick(menu.side, 'te', menu.s))}
               {edit.sync &&
                 pairs[menu.pair] &&
+                mismatched(pairs[menu.pair].sync) &&
+                menuItem(`Add split here (${menu.side} only)`, () => {
+                  const pr = pairs[menu.pair];
+                  syncEdit(menu.pair, addSplitOn(pr.sync, syncPlan, pr.arcs, menu.side, menu.s, ctxFor(menu.pair)));
+                })}
+              {edit.sync &&
+                pairs[menu.pair] &&
+                !mismatched(pairs[menu.pair].sync) &&
                 menuItem('Add split here (+ matching one on the other profile)', () => {
                   const pr = pairs[menu.pair];
-                  syncEdit(menu.pair, addSplit(pr.sync, plan, pr.arcs, menu.side, menu.s, ctxFor(menu.pair)));
+                  syncEdit(menu.pair, addSplit(pr.sync, syncPlan, pr.arcs, menu.side, menu.s, ctxFor(menu.pair)));
                 })}
             </>
           ) : menu.kind === 'jognode' ? (
@@ -871,11 +907,12 @@ export function Preview2D(props: Props) {
                 const at = pinAt(menu.i);
                 if (!at) return null;
                 const { p, j, pr } = at;
-                return menuItem('Remove pin', () => syncEdit(p, { sync: removePin(pr.sync, j), plan }));
+                return menuItem('Remove pin', () => syncEdit(p, { sync: removePin(pr.sync, j), plan: syncPlan }));
               })()}
             </>
           ) : (
             (() => {
+              if (!plan) return null;
               const s = plan.steps[menu.step];
               if (s?.kind !== 'line') return null;
               return (

@@ -348,7 +348,7 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
       const what = pairs.length > 1 ? `Contour pair ${p + 1}: root` : 'Root';
       return Object.assign(
         emptyResult([
-          `${what} has ${segCount(pr.arcs.root, pr.sync.root.length)} segments but tip has ${segCount(pr.arcs.tip, pr.sync.tip.length)}. Each root segment must pair with a tip segment; make the two profiles from the same entities, adjust the corner threshold, or add/remove splits.`,
+          `${what} has ${segCount(pr.arcs.root, pr.sync.root.length)} segments but tip has ${segCount(pr.arcs.tip, pr.sync.tip.length)}. Each root segment must pair with a tip segment. Click a split marker on the profile with more and choose Remove split (that profile only), or click a profile to add one, until the counts match; adjusting the corner split angle can also help.`,
         ], 'segment', warnings),
         extra,
       );
