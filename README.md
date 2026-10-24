@@ -12,6 +12,7 @@ The app walks you through seven pages:
 
 1. **Import Geometry**: open the **root** and **tip** DXFs, or click **Load V-tail example**.
 2. **Arrange Profiles**: set the distance between the profiles and how they sit relative to each other (twist, scale, move, flip).
+   - *Stock generation…* trims a raw board to that distance. Lay the board turned 90° (its future left and right faces at the front and back), confirm the length and thickness, and set how far back from X = 0 it sits, how much to trim off the front and how far the wire steps back before cutting up. The wire cuts down the front, pulls out, jogs over the board, cuts down the back, steps back into the waste and cuts up, so the kept face is cut once; each cut runs half a kerf into the waste. Download the G-code from the dialog.
 3. **Place in Machine**: pick the machine and material, say where the profiles are along the wire, how high above the floor, and the foam block.
 4. **Segment Profiles**: check that the numbered sync points line up (1 ↔ 1, 2 ↔ 2, …).
 5. **Sequence Cuts**: the order of the cut, run-outs and jogs.
