@@ -38,7 +38,7 @@ const SPEEDS = [1, 5, 20, 100];
 /** What each job page shows in 3D (the Import page has no 3D view). */
 function allowedFor(mode: StepId): Filters3D {
   const cut = mode === 'preview' || mode === 'export';
-  const profiles = cut || mode === 'transform' || mode === 'segment' || mode === 'sequence';
+  const profiles = cut || mode === 'transform' || mode === 'setup' || mode === 'segment' || mode === 'sequence';
   return { machine: true, block: true, profiles, surface: cut, wire: cut, carriages: cut };
 }
 

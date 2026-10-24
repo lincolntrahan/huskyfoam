@@ -266,4 +266,5 @@ table.contours select { width: 100%; }
 .rollback button { margin-left: auto; padding: 0 6px; font-size: 11px; }
 .pair-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .pair-chips button { display: inline-flex; align-items: center; gap: 4px; }
+.pair-chips button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: 0 0 0 1px var(--accent); }
 .insert-bar { align-items: center; }
