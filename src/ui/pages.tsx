@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CutResult } from '../core/cut/pipeline';
 import type { LoadedProfile } from '../core/io/loadProfile';
 import type { SourceFile } from '../core/io/project';
@@ -12,6 +13,7 @@ import { PlanPanel, type Pick } from './PlanPanel';
 import type { PairTemplate } from '../core/plan/tree';
 import { emptyPlan } from '../core/plan/model';
 import { download } from './PresetEditor';
+import { StockTrimDialog } from './StockTrim';
 import { TransformPanel } from './TransformPanel';
 import type { PresetOrigin } from './usePresets';
 
@@ -178,6 +180,7 @@ export function TransformPage(c: PageCtx) {
   const { job, patch } = c;
   const u = c.machine.units;
   const distance = job.profile.distance ?? job.span;
+  const [stock, setStock] = useState(false);
   return (
     <>
       <section>
@@ -194,7 +197,21 @@ export function TransformPage(c: PageCtx) {
           hint="Along the wire, root plane to tip plane (the panel span)"
         />
         <small className="hint">Drag a profile on the canvas to move it relative to the other one (it updates Move X / Y below).</small>
+        <div className="row-buttons">
+          <button onClick={() => setStock(true)} title="Trim a raw board to this length: G-code for two straight cuts with the board turned 90°">
+            Stock generation…
+          </button>
+        </div>
       </section>
+      {stock && (
+        <StockTrimDialog
+          job={job}
+          machine={c.machine}
+          length={distance}
+          thickness={job.layout?.block.h || job.block.h}
+          onClose={() => setStock(false)}
+        />
+      )}
       <TransformPanel value={job.transforms} units={u} onChange={(t, opts) => patch({ transforms: t, ...(opts?.resetPlan ? { plan: emptyPlan() } : {}) })} />
     </>
   );

@@ -160,6 +160,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .modal-body { overflow-y: auto; padding: 4px 14px 10px; }
 .modal-body h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 14px 0 6px; }
 .modal .msg { margin: 4px 14px; }
+.stock-preview { width: 100%; height: auto; max-height: 220px; margin: 10px 0 4px; background: var(--canvas); border: 1px solid var(--border); border-radius: 6px; }
 .field-block { display: grid; gap: 4px; margin: 6px 0; }
 button.danger { color: var(--err); border-color: var(--err); }
 .kt-row { display: grid; grid-template-columns: 1fr 1fr 70px; gap: 6px; align-items: center; margin-bottom: 4px; }
