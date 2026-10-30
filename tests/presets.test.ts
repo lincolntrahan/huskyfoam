@@ -124,7 +124,7 @@ describe('wire power', () => {
   it('adds a comment and fills the header token', () => {
     const m = { ...machine, header: '{units}\nG17\nG90\nM3 S{wireWatts}' };
     const g = run({ wireWatts: 42.5 }, m).gcode.split('\n');
-    expect(g[0]).toBe('(Set wire power to 42.5 W)');
+    expect(g[0]).toBe('(Set wire power to 42.5 W: volts across the wire bearings x supply amps)');
     expect(g).toContain('M3 S42.5');
   });
 });

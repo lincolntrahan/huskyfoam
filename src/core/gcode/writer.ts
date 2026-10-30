@@ -47,7 +47,7 @@ export function writeGcode(start: CarriagePos, moves: Move[], m: MachinePreset, 
     .replaceAll('{units}', m.units === 'in' ? 'G20' : 'G21')
     .replaceAll('{cutSpeed}', cutSpeed.toFixed(6))
     .replaceAll('{wireWatts}', watts != null ? short(watts, 1) : '');
-  if (watts != null) lines.push(`(Set wire power to ${short(watts, 1)} W)`);
+  if (watts != null) lines.push(`(Set wire power to ${short(watts, 1)} W: volts across the wire bearings x supply amps)`);
   lines.push(...header.split(/\r?\n/).filter((l) => l.trim()));
   lines.push(`G0${axisWords(start, m)}`);
   lines.push(m.feedMode);

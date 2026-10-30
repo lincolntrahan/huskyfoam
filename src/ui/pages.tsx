@@ -12,7 +12,7 @@ import { NumberField, SelectField } from './Fields';
 import { PlanPanel, type Pick } from './PlanPanel';
 import type { PairTemplate } from '../core/plan/tree';
 import { emptyPlan } from '../core/plan/model';
-import { download } from './PresetEditor';
+import { download, WirePowerNote } from './PresetEditor';
 import { StockTrimDialog } from './StockTrim';
 import { TransformPanel } from './TransformPanel';
 import type { PresetOrigin } from './usePresets';
@@ -658,6 +658,7 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
         <div className="callout">
           Before cutting, set the hot-wire power to <strong>{job.wireWatts} W</strong>
           <small>from material “{c.material.name}”</small>
+          <WirePowerNote />
         </div>
       ) : (
         <div className="callout warn">
