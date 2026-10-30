@@ -78,6 +78,7 @@ export function App() {
       kerfTable: mat.kerfTable ?? [],
       dwell: mat.cornerDwell ?? j.dwell,
       wireWatts: mat.wireWatts ?? null,
+      wireDiameter: mat.wireDiameter ?? null,
       minSpeed: mat.minSpeed ?? null,
     }));
   };

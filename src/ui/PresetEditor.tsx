@@ -308,6 +308,24 @@ export function MaterialEditor(props: {
         />
       </label>
       <WirePowerNote />
+      <label className="field" title="Wire to string the machine with for this material. Written into the G-code as a comment.">
+        <span>Wire diameter ({u})</span>
+        <input
+          type="number"
+          step="any"
+          min={0}
+          placeholder="not set"
+          value={m.wireDiameter ?? ''}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            set({ wireDiameter: Number.isFinite(v) && v > 0 ? v : undefined });
+          }}
+        />
+      </label>
+      <small className="hint">
+        The wire the kerf table, speeds and power were calibrated with. A different diameter changes how much power it takes to reach the same
+        temperature and how wide it cuts, so recalibrate (kerf test) if you change it.
+      </small>
       <label className="field" title="Below this face speed the cut gets wide and hourglassed. Export warns when a cut needs it; it doesn't block.">
         <span>Minimum feed speed ({u}/min)</span>
         <input

@@ -29,7 +29,10 @@ export function StockTrimDialog(props: { job: JobSettings; machine: MachinePrese
     speed: job.cutSpeed,
   }));
   const set = (p: Partial<StockTrimSpec>) => setSpec((s) => ({ ...s, ...p }));
-  const res = useMemo(() => stockTrim(spec, machine, job.wireWatts), [spec, machine, job.wireWatts]);
+  const res = useMemo(
+    () => stockTrim(spec, machine, { wireWatts: job.wireWatts, wireDiameter: job.wireDiameter }),
+    [spec, machine, job.wireWatts, job.wireDiameter],
+  );
   const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
   return (

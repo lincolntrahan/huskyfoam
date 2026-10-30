@@ -1,5 +1,5 @@
 import type { Vec2 } from '../geom/vec';
-import { writeGcode, type Move } from '../gcode/writer';
+import { writeGcode, type Move, type WriteOptions } from '../gcode/writer';
 import type { MachinePreset } from '../types';
 
 /**
@@ -46,7 +46,7 @@ export interface StockTrimResult {
  * front along the floor and up, jog over the board to the back cut, cut down, step back
  * `backOffset` and cut up through the waste, then jog home over the board.
  */
-export function stockTrim(spec: StockTrimSpec, machine: MachinePreset, wireWatts?: number | null): StockTrimResult {
+export function stockTrim(spec: StockTrimSpec, machine: MachinePreset, wire: WriteOptions = {}): StockTrimResult {
   const k2 = spec.kerf / 2;
   const front = spec.setback + spec.trimFront - k2;
   const back = spec.setback + spec.trimFront + spec.length + k2;
@@ -95,6 +95,6 @@ export function stockTrim(spec: StockTrimSpec, machine: MachinePreset, wireWatts
     const v = Math.min(kind === 'cut' ? spec.speed : machine.jogSpeed, machine.maxSpeed);
     moves.push({ left: p, right: p, minutes: d / v, lead: kind === 'jog', speed: kind });
   }
-  const gcode = writeGcode({ left: home, right: home }, moves, machine, spec.speed, { wireWatts });
+  const gcode = writeGcode({ left: home, right: home }, moves, machine, spec.speed, wire);
   return { path, front, back, up, safe, errors, gcode };
 }

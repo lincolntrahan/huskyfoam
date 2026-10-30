@@ -127,6 +127,12 @@ describe('wire power', () => {
     expect(g[0]).toBe('(Set wire power to 42.5 W: volts across the wire bearings x supply amps)');
     expect(g).toContain('M3 S42.5');
   });
+
+  it('notes the wire diameter', () => {
+    const g = run({ wireWatts: 42.5, wireDiameter: 0.02 }).gcode.split('\n');
+    expect(g[1]).toBe(`(Wire diameter 0.02 ${machine.units})`);
+    expect(run({}).gcode).not.toMatch(/Wire diameter/);
+  });
 });
 
 describe('kerf test', () => {

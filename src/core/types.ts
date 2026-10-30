@@ -69,6 +69,8 @@ export interface MaterialPreset {
   cornerDwell?: DwellSettings;
   /** Hot-wire power to set on the cutter's supply, watts. Written as a comment and {wireWatts}. */
   wireWatts?: number;
+  /** Wire diameter this material is calibrated with (units). Written as a G-code comment. */
+  wireDiameter?: number;
   /**
    * Slowest a foam face should be cut, units/min: below it the cut gets wide and hourglassed.
    * Only warns. Missing = no limit.
@@ -129,6 +131,8 @@ export interface JobSettings {
   dwell: DwellSettings;
   /** Hot-wire power for this job, watts (from the material); null = not specified. */
   wireWatts: number | null;
+  /** Wire diameter to string the machine with, from the material; null = not specified. */
+  wireDiameter: number | null;
   /** Slowest face speed before the cut gets poor, from the material (warning only); null = none. */
   minSpeed: number | null;
   /** Cut speed at the faster face, units/min. */

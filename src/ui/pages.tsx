@@ -143,7 +143,8 @@ function materialSummary(job: JobSettings, u: string): string {
       ? `kerf from a ${job.kerfTable.length}-row speed table`
       : `kerf ${job.kerf.root} root / ${job.kerf.tip} tip`;
   const power = job.wireWatts != null ? `${job.wireWatts} W` : 'no wire power set';
-  return `Cuts at ${job.cutSpeed} ${u}/min · ${kerf} ${u} · ${power}. Change these in the material (Edit…).`;
+  const wire = job.wireDiameter != null ? `${job.wireDiameter} ${u} wire` : 'no wire diameter set';
+  return `Cuts at ${job.cutSpeed} ${u}/min · ${kerf} ${u} · ${power} · ${wire}. Change these in the material (Edit…).`;
 }
 
 // ---------------------------------------------------------------- 1. Import
@@ -657,6 +658,12 @@ export function ExportPage(c: PageCtx & { fileName: string; setFileName: (s: str
       {job.wireWatts != null ? (
         <div className="callout">
           Before cutting, set the hot-wire power to <strong>{job.wireWatts} W</strong>
+          {job.wireDiameter != null && (
+            <>
+              {' '}
+              with <strong>{job.wireDiameter} {machine.units}</strong> wire
+            </>
+          )}
           <small>from material “{c.material.name}”</small>
           <WirePowerNote />
         </div>
