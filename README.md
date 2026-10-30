@@ -151,6 +151,8 @@ A material can set a **minimum feed speed**: if any cut moves a foam face slower
 - **Per-segment kerf / speed**: select a segment in the cut-plan list (or click it on the canvas) and fill in the two fields. Blank = the job value.
 - **Corner dwell**: pauses (`G4 P…`) at corners sharper than the set angle. Defaults come from the material. Whether `P` is seconds or milliseconds is a machine setting.
 - **Wire power (W)**: set per material. It's written at the top of the G-code as a comment and is available to the machine header as `{wireWatts}` (e.g. `M3 S{wireWatts}`).
+  - **Setting it:** power = volts × amps, with the **volts measured by a multimeter across the wire at its two bearings** and the amps read off the supply. Don't use the supply's voltage display: it includes the drop in the leads, clamps and connections, which changes with every setup (lead length, clamp contact, wire length), so the same supply reading can put noticeably different power into the wire. The current is the same everywhere in the circuit, so the supply's ammeter is fine. Matching the power in the wire keeps it at the same temperature, so the kerf table and speeds stay valid between setups. Run the kerf test with the power set the same way.
+- **Wire diameter**: set per material, in the material's units: the wire its kerf table, speeds and power were calibrated with. It shows in the material summary and the Export callout, and goes into the G-code as a comment. A different diameter needs a different power for the same temperature and cuts a different kerf, so rerun the kerf test if you change it.
 
 ## Projects
 

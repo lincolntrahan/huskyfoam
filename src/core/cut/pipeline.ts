@@ -575,7 +575,7 @@ export function generateCut(rootIn: Profile | Profile[], tipIn: Profile | Profil
     gaps: walk.gaps,
     start,
     moves,
-    gcode: ok ? writeGcode(start, moves, machine, job.cutSpeed, { wireWatts: job.wireWatts }) : '',
+    gcode: ok ? writeGcode(start, moves, machine, job.cutSpeed, { wireWatts: job.wireWatts, wireDiameter: job.wireDiameter }) : '',
     stats: { cutMinutes, maxCarriageSpeed, segments: n, moves: moves.length, dwells },
   };
 }

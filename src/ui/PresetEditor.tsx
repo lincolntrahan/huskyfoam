@@ -14,6 +14,22 @@ export function download(name: string, text: string, type = 'text/plain') {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * How to set the wire power, and why: the supply's own voltage reading includes the leads and
+ * connections, which change from setup to setup.
+ */
+export function WirePowerNote() {
+  return (
+    <small className="hint">
+      Set the power as <b>volts × amps</b>, with the volts measured by a <b>multimeter across the wire at its two bearings</b> and the amps read off the
+      supply. Don't go by the supply's voltage display: it includes the drop in the leads, clamps and connections, which changes with every setup (lead
+      length, how tight a clamp is, wire length), so the same reading on the supply can put noticeably different power into the wire. The current is the
+      same all the way round the circuit, so the supply's ammeter is fine. Matching the power in the wire itself keeps it at the same temperature, so the
+      kerf and speeds you calibrated stay right from one setup to the next.
+    </small>
+  );
+}
+
 async function pickJson(): Promise<unknown | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
@@ -277,7 +293,7 @@ export function MaterialEditor(props: {
       </label>
       <SelectField label="Units" value={m.units} options={[{ value: 'in', label: 'Inches' }, { value: 'mm', label: 'Millimetres' }]} onChange={(v) => set({ units: v })} />
       <NumberField label={`Cut speed (${u}/min)`} value={m.cutSpeed} onChange={(v) => set({ cutSpeed: v })} hint="Wire speed at the faster foam face" />
-      <label className="field" title="Set your hot-wire supply to this. Written into the G-code as a comment and the {wireWatts} header token.">
+      <label className="field" title="Power in the wire: volts measured across the wire bearings × amps from the supply. Written into the G-code as a comment and the {wireWatts} header token.">
         <span>Wire power (W)</span>
         <input
           type="number"
@@ -291,6 +307,25 @@ export function MaterialEditor(props: {
           }}
         />
       </label>
+      <WirePowerNote />
+      <label className="field" title="Wire to string the machine with for this material. Written into the G-code as a comment.">
+        <span>Wire diameter ({u})</span>
+        <input
+          type="number"
+          step="any"
+          min={0}
+          placeholder="not set"
+          value={m.wireDiameter ?? ''}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            set({ wireDiameter: Number.isFinite(v) && v > 0 ? v : undefined });
+          }}
+        />
+      </label>
+      <small className="hint">
+        The wire the kerf table, speeds and power were calibrated with. A different diameter changes how much power it takes to reach the same
+        temperature and how wide it cuts, so recalibrate (kerf test) if you change it.
+      </small>
       <label className="field" title="Below this face speed the cut gets wide and hourglassed. Export warns when a cut needs it; it doesn't block.">
         <span>Minimum feed speed ({u}/min)</span>
         <input
@@ -330,6 +365,11 @@ export function MaterialEditor(props: {
       <KerfTableEditor rows={m.kerfTable ?? []} units={u} onChange={(rows) => set({ kerfTable: rows })} />
       <details>
         <summary>Kerf test (fills the table)</summary>
+        <small className="hint">
+          Cut the test plugs at this material's wire power, set the same way (volts across the bearings × supply amps): the kerf table only holds at the
+          power it was measured at.
+        </small>
+        <WirePowerNote />
         <KerfTest material={m} machine={props.machine} onTable={(rows) => set({ kerfTable: rows })} />
       </details>
       <h3>Corner dwell (default)</h3>

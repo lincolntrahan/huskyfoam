@@ -64,7 +64,7 @@ export function kerfTestGcode(spec: KerfTestSpec, machine: MachinePreset, materi
   }
   go(machine.home, machine.jogSpeed, 'jog');
   const start = { left: machine.home, right: machine.home };
-  return { gcode: writeGcode(start, moves, machine, material.cutSpeed, { wireWatts: material.wireWatts }), plugs };
+  return { gcode: writeGcode(start, moves, machine, material.cutSpeed, { wireWatts: material.wireWatts, wireDiameter: material.wireDiameter }), plugs };
 }
 
 /** Kerf table rows from measured plug sizes (blank/invalid measurements are skipped). */
