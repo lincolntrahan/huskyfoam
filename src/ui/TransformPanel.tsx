@@ -95,17 +95,17 @@ export function TransformPanel({ value: t, onChange, units }: Props) {
         />
         Link root &amp; tip (scale, pivot)
       </label>
-      <div className="row-buttons">
-        <label className="check" title="Mirror both profiles left-right about their pivots (cut TE-first)">
-          <input type="checkbox" checked={t.flipH} onChange={(e) => onChange({ ...t, flipH: e.target.checked }, { resetPlan: true })} />
-          Flip horizontal
-        </label>
-        <label className="check" title="Mirror both profiles top-bottom about their pivots (cut upside down)">
-          <input type="checkbox" checked={t.flipV} onChange={(e) => onChange({ ...t, flipV: e.target.checked }, { resetPlan: true })} />
-          Flip vertical
-        </label>
-      </div>
-      <small className="hint">Flips apply to both profiles and reset the cut plan (segment numbering changes). Both flips together = rotate 180°.</small>
+      <small className="hint">To rotate or mirror a profile, use the buttons above its picker on Import Geometry.</small>
+      {/* flipping moved to Import; a project saved with a flip still needs a way to take it off */}
+      {(t.flipH || t.flipV) && (
+        <div className="callout warn">
+          This project was saved with a flip from an older version, and it's still applied.
+          <div className="row-buttons">
+            <button onClick={() => onChange({ ...t, flipH: false, flipV: false }, { resetPlan: true })}>Remove flip</button>
+          </div>
+          <small>This resets the cut plan. Mirror the profiles on Import Geometry instead.</small>
+        </div>
+      )}
     </section>
   );
 }

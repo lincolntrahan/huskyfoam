@@ -54,6 +54,8 @@ interface Props {
   onChordPick: (side: Side, end: 'le' | 'te', s: number) => void;
   /** Arrange Profiles: a profile is being dragged by `delta` (world units) from where it was grabbed. */
   onProfileDrag?: (side: Side, phase: 'start' | 'move' | 'end', delta: Vec2) => void;
+  /** A split or pin started / stopped being dragged: the part has to hold still meanwhile. */
+  onSyncDrag?: (phase: 'start' | 'end') => void;
   /** Sequence Cuts: the pair the templates apply to (click a contour to pick it). */
   selectedPair?: number | null;
   onSelectPair?: (p: number | null) => void;
@@ -572,8 +574,12 @@ export function Preview2D(props: Props) {
           const sd = syncDrag.current;
           if (sd) {
             if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) < 4) return;
+            if (drawing || !edit.sync) {
+              sd.moved = true;
+              return;
+            }
+            if (!sd.moved) props.onSyncDrag?.('start');
             sd.moved = true;
-            if (drawing || !edit.sync) return;
             const at = sd.kind === 'split' ? splitAt(sd.i, sd.side) : pinAt(sd.i);
             if (!at) return;
             const sNew = sOnProfile(sd.side, toWorld(e.clientX, e.clientY), at.p);
@@ -610,7 +616,10 @@ export function Preview2D(props: Props) {
           const sd = syncDrag.current;
           if (sd) {
             syncDrag.current = null;
-            if (sd.moved) return;
+            if (sd.moved) {
+              props.onSyncDrag?.('end');
+              return;
+            }
             if (sd.kind === 'split' && props.pick === 'jog') props.onPickSplit?.(sd.i);
             else if (sd.kind === 'split' && drawing) finishDrawing(sd.i);
             else if (sd.kind === 'split') setMenu({ kind: 'split', k: sd.i, side: sd.side, ...toWrap(e.clientX, e.clientY) });
@@ -629,9 +638,10 @@ export function Preview2D(props: Props) {
             else if (drawing) setDrawing({ ...drawing, pts: [...drawing.pts, toWorld(e.clientX, e.clientY)] });
           }
         }}
-        onDoubleClick={() => {
+        onDoubleClick={(e) => {
           if (drawing) finishDrawing(null);
-          else setView(content);
+          // refit on empty canvas only: two quick clicks on a marker or an outline aren't a refit
+          else if (!(e.target as Element).closest('.clickable, .grab')) setView(content);
         }}
       >
         <defs>
