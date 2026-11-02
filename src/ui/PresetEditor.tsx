@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { defaultKerfTest, kerfTableFromMeasurements, kerfTestGcode, type KerfTestSpec } from '../core/cut/kerfTest';
 import { validateMachine, validateMaterial } from '../core/io/project';
 import type { AxisLetters, KerfPoint, MachinePreset, MaterialPreset } from '../core/types';
-import { NumberField, SelectField } from './Fields';
+import { NumberField, OptionalNumberField, SelectField } from './Fields';
 import { slug, type PresetOrigin } from './usePresets';
 
 export function download(name: string, text: string, type = 'text/plain') {
@@ -293,53 +293,32 @@ export function MaterialEditor(props: {
       </label>
       <SelectField label="Units" value={m.units} options={[{ value: 'in', label: 'Inches' }, { value: 'mm', label: 'Millimetres' }]} onChange={(v) => set({ units: v })} />
       <NumberField label={`Cut speed (${u}/min)`} value={m.cutSpeed} onChange={(v) => set({ cutSpeed: v })} hint="Wire speed at the faster foam face" />
-      <label className="field" title="Power in the wire: volts measured across the wire bearings × amps from the supply. Written into the G-code as a comment and the {wireWatts} header token.">
-        <span>Wire power (W)</span>
-        <input
-          type="number"
-          step="any"
-          min={0}
-          placeholder="not set"
-          value={m.wireWatts ?? ''}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            set({ wireWatts: Number.isFinite(v) ? v : undefined });
-          }}
-        />
-      </label>
+      <OptionalNumberField
+        label="Wire power (W)"
+        title="Power in the wire: volts measured across the wire bearings × amps from the supply. Written into the G-code as a comment and the {wireWatts} header token."
+        value={m.wireWatts}
+        onChange={(v) => set({ wireWatts: v })}
+      />
       <WirePowerNote />
-      <label className="field" title="Wire to string the machine with for this material. Written into the G-code as a comment.">
-        <span>Wire diameter ({u})</span>
-        <input
-          type="number"
-          step="any"
-          min={0}
-          placeholder="not set"
-          value={m.wireDiameter ?? ''}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            set({ wireDiameter: Number.isFinite(v) && v > 0 ? v : undefined });
-          }}
-        />
-      </label>
+      <OptionalNumberField
+        label={`Wire diameter (${u})`}
+        title="Wire to string the machine with for this material. Written into the G-code as a comment."
+        value={m.wireDiameter}
+        positive
+        onChange={(v) => set({ wireDiameter: v })}
+      />
       <small className="hint">
         The wire the kerf table, speeds and power were calibrated with. A different diameter changes how much power it takes to reach the same
         temperature and how wide it cuts, so recalibrate (kerf test) if you change it.
       </small>
-      <label className="field" title="Below this face speed the cut gets wide and hourglassed. Export warns when a cut needs it; it doesn't block.">
-        <span>Minimum feed speed ({u}/min)</span>
-        <input
-          type="number"
-          step="any"
-          min={0}
-          placeholder="no limit"
-          value={m.minSpeed ?? ''}
-          onChange={(e) => {
-            const v = parseFloat(e.target.value);
-            set({ minSpeed: Number.isFinite(v) && v > 0 ? v : undefined });
-          }}
-        />
-      </label>
+      <OptionalNumberField
+        label={`Minimum feed speed (${u}/min)`}
+        title="Below this face speed the cut gets wide and hourglassed. Export warns when a cut needs it; it doesn't block."
+        value={m.minSpeed}
+        positive
+        placeholder="no limit"
+        onChange={(v) => set({ minSpeed: v })}
+      />
       <small className="hint">Slowest a foam face should be cut before the cut gets wide and hourglassed (the slower face on a tapered part). Export warns, but doesn't block.</small>
       <h3>Kerf ({u})</h3>
       <small className="hint">

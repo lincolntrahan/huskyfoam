@@ -111,11 +111,26 @@ export function App() {
     () => (root?.contours.length && tip?.contours.length ? generateCut(root.contours, tip.contours, placed, machine) : null),
     [root, tip, placed, machine],
   );
+  /**
+   * While something is dragged on the canvas it has to hold still under the cursor: the part keeps
+   * its offset (placement follows the carriage path, which every split and profile move changes)
+   * and the messages under the canvas keep their height, so the canvas doesn't resize.
+   */
+  const statusRef = useRef<HTMLDivElement>(null);
+  const [statusHeight, setStatusHeight] = useState<number | null>(null);
+  const holdPart = () => {
+    setHold(placed.offset);
+    setStatusHeight(statusRef.current?.getBoundingClientRect().height ?? null);
+  };
+  const releasePart = () => {
+    setHold(null);
+    setStatusHeight(null);
+  };
   /** Drag one profile on Arrange Profiles: moves it relative to the other. */
   const onProfileDrag = (side: 'root' | 'tip', phase: 'start' | 'move' | 'end', delta: Vec2) => {
     if (phase === 'start') {
       dragStart.current = job.transforms[side].move;
-      setHold(placed.offset);
+      holdPart();
       return;
     }
     const start = dragStart.current;
@@ -125,7 +140,7 @@ export function App() {
     }
     if (phase === 'end') {
       dragStart.current = null;
-      setHold(null);
+      releasePart();
     }
   };
   const plan: CutPlan | null = result?.plan ?? null;
@@ -495,6 +510,7 @@ export function App() {
               layers={layers}
               block={placed.block}
               onProfileDrag={onProfileDrag}
+              onSyncDrag={(phase) => (phase === 'start' ? holdPart() : releasePart())}
               selectedPair={selectedPair}
               onSelectPair={setSelectedPair}
               pick={pick}
@@ -551,7 +567,7 @@ export function App() {
             )}
           </div>
 
-          <div className="status">
+          <div className="status" ref={statusRef} style={statusHeight === null ? undefined : { height: statusHeight, boxSizing: 'border-box' }}>
             {result && page !== 'import' && (
               <div className="stats">
                 <span>

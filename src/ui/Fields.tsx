@@ -28,6 +28,45 @@ export function NumberField(props: { label: string; value: number; onChange: (v:
   );
 }
 
+/**
+ * Number input for an optional setting: blank means not set. `positive` also treats 0 as not set.
+ * It keeps the text as typed, so "0" on the way to "0.001" stays in the box.
+ */
+export function OptionalNumberField(props: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  positive?: boolean;
+  placeholder?: string;
+  title?: string;
+}) {
+  const parse = (t: string) => {
+    const v = parseFloat(t);
+    return Number.isFinite(v) && (!props.positive || v > 0) ? v : undefined;
+  };
+  const [text, setText] = useState(props.value === undefined ? '' : show(props.value));
+  useEffect(() => {
+    if (parse(text) !== props.value) setText(props.value === undefined ? '' : show(props.value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.value]);
+  return (
+    <label className="field" title={props.title}>
+      <span>{props.label}</span>
+      <input
+        type="number"
+        step="any"
+        min={0}
+        placeholder={props.placeholder ?? 'not set'}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          props.onChange(parse(e.target.value));
+        }}
+      />
+    </label>
+  );
+}
+
 export function SelectField<T extends string>(props: { label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
     <label className="field">
