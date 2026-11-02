@@ -100,6 +100,8 @@ export interface JobSettings {
   selection: { root: number[] | null; tip: number[] | null };
   /** Each DXF is rotated by this many degrees (0, 90, 180, 270; CCW) on import, to match the cutter's axes. */
   rotation: { root: number; tip: number };
+  /** Mirror each imported profile in X, before its rotation. */
+  mirror: { root: boolean; tip: boolean };
   /**
    * How the part sits on the machine: profile position along the wire, floor offset, block size
    * and alignment. The fields below it (rootFaceFromLeft, span, profile.inset, offset, block)

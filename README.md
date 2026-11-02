@@ -103,6 +103,7 @@ The **Transforms** section adjusts each profile without going back to CAD:
   - The LE/TE are found automatically, ignoring straight tabs. To use your own, click a split marker → *Use as LE / TE*.
 - **Scale**: per profile. *Link root & tip* (on by default) applies it to both.
 - **Move**: per profile, relative to the other one. You can also **drag a profile on the canvas**; a plain click on the outline still sets the LE / TE.
+- **Mirror on Import**: ⇆ and ⇅ next to the rotate buttons mirror one imported profile as shown (for example a tip drawn the opposite way round from the root). Like rotating, this restarts the splits and cut plan.
 - **Flip horizontal / vertical**: applies to both profiles (cut TE-first or upside down; both together = rotate 180°). Flipping resets the cut plan, since segment numbering changes.
 - **Mirror L/R** (on *Place in Machine*, next to *Root profile on*): cuts the opposite-hand panel by putting the root on the other carriage.
 

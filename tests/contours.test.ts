@@ -1,3 +1,4 @@
+import { signedArea } from '../src/core/geom/profile';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { autoPairs, insidePolygon } from '../src/core/cut/contours';
@@ -5,7 +6,7 @@ import { generateCut } from '../src/core/cut/pipeline';
 import { arcLoop } from '../src/core/geom/arc';
 import type { Profile } from '../src/core/geom/profile';
 import type { Vec2 } from '../src/core/geom/vec';
-import { loadDxfProfile, rotate90 } from '../src/core/io/loadProfile';
+import { flipOrientation, loadDxfProfile, rotate90 } from '../src/core/io/loadProfile';
 import { segSplits } from '../src/core/plan/model';
 import { defaultJob, materials } from '../src/core/presets';
 import { addSplit, moveSplit } from '../src/core/sync/edit';
@@ -251,5 +252,34 @@ describe('rotating on import', () => {
     const span = (p: Profile, k: 'x' | 'y') => Math.max(...p.pts.map((q) => q[k])) - Math.min(...p.pts.map((q) => q[k]));
     expect(span(upright.profile!, 'y')).toBeCloseTo(span(flat.profile!, 'x'), 9);
     expect(upright.contourEdges.flat().sort()).toEqual(flat.contourEdges.flat().sort());
+  });
+});
+
+describe('mirroring on import', () => {
+  const text = fx('vtail-root.dxf');
+  const pts = (rotation: number, mirrored: boolean) => loadDxfProfile(text, 'in', null, rotation, mirrored).edges.flatMap((e) => e.pts);
+
+  it('mirrors what is on screen at any rotation, left-right or top-bottom', () => {
+    for (const r of [0, 90, 180, 270]) {
+      for (const m of [false, true]) {
+        const before = pts(r, m);
+        const x = flipOrientation(r, m, 'x');
+        const y = flipOrientation(r, m, 'y');
+        const fx2 = pts(x.rotation, x.mirrored);
+        const fy2 = pts(y.rotation, y.mirrored);
+        before.forEach((p, i) => {
+          expect(fx2[i].x).toBeCloseTo(-p.x, 9);
+          expect(fx2[i].y).toBeCloseTo(p.y, 9);
+          expect(fy2[i].x).toBeCloseTo(p.x, 9);
+          expect(fy2[i].y).toBeCloseTo(-p.y, 9);
+        });
+      }
+    }
+  });
+
+  it('keeps closed contours CCW, and flipping twice restores the profile', () => {
+    expect(signedArea(loadDxfProfile(text, 'in', null, 0, true).profile!.pts)).toBeGreaterThan(0);
+    const once = flipOrientation(90, false, 'x');
+    expect(flipOrientation(once.rotation, once.mirrored, 'x')).toEqual({ rotation: 90, mirrored: false });
   });
 });

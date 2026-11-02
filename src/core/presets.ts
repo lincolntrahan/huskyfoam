@@ -20,6 +20,7 @@ export function defaultJob(machine: MachinePreset, material: MaterialPreset): Jo
     offset: { x: 0, y: 0 },
     selection: { root: null, tip: null },
     rotation: { root: 0, tip: 0 },
+    mirror: { root: false, tip: false },
     profile: { distance: null, inset: null },
     kerf: { mode: material.kerfMode ?? 'fixed', root: material.kerfRoot, tip: material.kerfTip },
     kerfTable: material.kerfTable ?? [],
