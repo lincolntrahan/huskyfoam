@@ -46,6 +46,9 @@ export function DxfPicker(props: {
   /** Current rotation (degrees, CCW) and a way to change it. */
   rotation: number;
   onRotate: (deg: number) => void;
+  /** Whether it's mirrored, and a way to flip it as shown, left-right or top-bottom. */
+  mirrored: boolean;
+  onFlip: (axis: 'x' | 'y') => void;
 }) {
   const { loaded } = props;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -133,7 +136,14 @@ export function DxfPicker(props: {
           <button onClick={() => props.onRotate(props.rotation - 90)} title="Rotate this profile 90° clockwise">
             ⟳ 90°
           </button>
+          <button onClick={() => props.onFlip('x')} title="Mirror this profile left-right">
+            ⇆ Mirror
+          </button>
+          <button onClick={() => props.onFlip('y')} title="Mirror this profile top-bottom">
+            ⇅ Mirror
+          </button>
           {props.rotation % 360 !== 0 && <span className="hint">rotated {((props.rotation % 360) + 360) % 360}°</span>}
+          {props.mirrored && <span className="hint">mirrored</span>}
         </span>
       </div>
       <svg

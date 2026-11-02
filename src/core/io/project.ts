@@ -44,6 +44,7 @@ export function normalizeJob(job: Partial<JobSettings> & Record<string, unknown>
     profile: { ...d.profile, ...(job.profile ?? {}) },
     selection: { ...d.selection, ...(job.selection ?? {}) },
     rotation: { ...d.rotation, ...(job.rotation ?? {}) },
+    mirror: { ...d.mirror, ...(job.mirror ?? {}) },
     dwell: { ...d.dwell, ...(job.dwell ?? {}) },
     transforms: {
       ...defaultTransforms(),

@@ -39,15 +39,25 @@ export function rotate90(p: Vec2, deg: number): Vec2 {
 }
 
 /**
- * Parse a DXF into its contours, converted to `target` units and rotated by `rotation` degrees
- * (multiples of 90, CCW) to match the cutter's axes. `selection` limits it to those entity
- * indices; null = automatic: the largest closed outline and every contour inside it.
+ * The orientation after flipping a profile as it's shown now, left-right ('x') or top-bottom
+ * ('y'). Orientation is a mirror in X (if any) followed by the rotation, so a flip on screen
+ * negates the rotation (plus a half turn for top-bottom) and toggles the mirror.
  */
-export function loadDxfProfile(text: string, target: Units, selection: number[] | null = null, rotation = 0): LoadedProfile {
+export function flipOrientation(rotation: number, mirrored: boolean, axis: 'x' | 'y'): { rotation: number; mirrored: boolean } {
+  return { rotation: (((axis === 'x' ? -rotation : 180 - rotation) % 360) + 360) % 360, mirrored: !mirrored };
+}
+
+/**
+ * Parse a DXF into its contours, converted to `target` units, mirrored in X if `mirrored`, then
+ * rotated by `rotation` degrees (multiples of 90, CCW) to match the cutter's axes. Chaining comes
+ * after, so closed contours still run CCW. `selection` limits it to those entity indices;
+ * null = automatic: the largest closed outline and every contour inside it.
+ */
+export function loadDxfProfile(text: string, target: Units, selection: number[] | null = null, rotation = 0, mirrored = false): LoadedProfile {
   const dxf = parseDxf(text);
   const warnings = [...dxf.warnings];
   const k = dxf.units && dxf.units !== target ? toMm[dxf.units] / toMm[target] : 1;
-  const sc = (p: Vec2) => rotate90(k === 1 ? p : { x: p.x * k, y: p.y * k }, rotation);
+  const sc = (p: Vec2) => rotate90({ x: (mirrored ? -k : k) * p.x, y: k * p.y }, rotation);
   const edges = dxf.edges.map((e) => ({ ...e, pts: e.pts.map(sc) }));
   const texts = dxf.texts.map((t) => ({ ...t, at: sc(t.at), height: t.height * k }));
   if (!dxf.units) warnings.push(`The DXF does not say what units it uses; assuming ${target}.`);

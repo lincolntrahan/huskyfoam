@@ -163,7 +163,7 @@ export function ImportPage(c: PageCtx) {
         </small>
         <FileRow label="Root" color="var(--root)" file={c.rootFile} loaded={c.root} onLoad={c.loadRoot} />
         <FileRow label="Tip" color="var(--tip)" file={c.tipFile} loaded={c.tip} onLoad={c.loadTip} />
-        <small className="hint">If a profile comes in on its side (CAD and cutter axes differ), turn it with the ⟲ / ⟳ 90° buttons above its picker.</small>
+        <small className="hint">If a profile comes in on its side (CAD and cutter axes differ), turn it with the ⟲ / ⟳ 90° buttons above its picker. ⇆ and ⇅ mirror it as shown, left-right or top-bottom.</small>
         <div className="row-buttons">
           <button onClick={c.loadExample}>Load V-tail example</button>
           <button className="danger" disabled={!c.rootFile && !c.tipFile} onClick={c.resetProject} title="Clear both profiles and every job setting (presets are kept)">
