@@ -53,6 +53,27 @@ function arcPoints(cx: number, cy: number, r: number, a0: number, a1: number): V
   return pts;
 }
 
+/**
+ * Points along a DXF ELLIPSE. Center and major-axis vector are in WCS; `ratio` is minor/major;
+ * t0..t1 are parametric angles (radians), swept CCW about the extrusion normal (nz = ±1).
+ */
+function ellipsePoints(c: Vec2, major: Vec2, ratio: number, t0: number, t1: number, nz: number): Vec2[] {
+  // minor axis = N × major, scaled by ratio
+  const minor = { x: -nz * major.y * ratio, y: nz * major.x * ratio };
+  let sweep = t1 - t0;
+  while (sweep <= 1e-12) sweep += 2 * Math.PI;
+  if (sweep > 2 * Math.PI) sweep = 2 * Math.PI;
+  const n = Math.max(2, Math.ceil(sweep / ARC_STEP_RAD));
+  const pts: Vec2[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = t0 + (sweep * i) / n;
+    const ct = Math.cos(t);
+    const st = Math.sin(t);
+    pts.push({ x: c.x + major.x * ct + minor.x * st, y: c.y + major.y * ct + minor.y * st });
+  }
+  return pts;
+}
+
 /** Points along a polyline segment from p to q with DXF bulge (tan(sweep/4), + = CCW). */
 function bulgePoints(p: Vec2, q: Vec2, bulge: number): Vec2[] {
   if (Math.abs(bulge) < 1e-12) return [p, q];
@@ -158,6 +179,18 @@ export function parseDxf(text: string): DxfResult {
       }
       case 'CIRCLE': {
         const pts = arcPoints(num(g, 10), num(g, 20), num(g, 40), 0, 2 * Math.PI);
+        edges.push({ pts, source: type });
+        break;
+      }
+      case 'ELLIPSE': {
+        const major = { x: num(g, 11), y: num(g, 21) };
+        const ratio = num(g, 40, 1);
+        if (Math.hypot(major.x, major.y) < 1e-12 || !(ratio > 0)) {
+          warnings.push('Skipped an ELLIPSE with invalid axis data.');
+          break;
+        }
+        const nz = num(g, 230, 1) < 0 ? -1 : 1;
+        const pts = ellipsePoints({ x: num(g, 10), y: num(g, 20) }, major, ratio, num(g, 41, 0), num(g, 42, 2 * Math.PI), nz);
         edges.push({ pts, source: type });
         break;
       }

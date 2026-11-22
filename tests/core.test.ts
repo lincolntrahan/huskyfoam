@@ -48,6 +48,31 @@ describe('DXF import', () => {
     for (const p of pts) expect(Math.hypot(p.x - 1, p.y)).toBeCloseTo(1, 9);
     expect(Math.min(...pts.map((p) => p.y))).toBeCloseTo(-1, 3); // CCW from (0,0) to (2,0) dips below
   });
+
+  it('imports a full rotated ELLIPSE as a closed profile', () => {
+    // center (1,2), major axis 3 long along 45°, minor/major 0.5
+    const a = 3 / Math.SQRT2;
+    const r = parseDxf(dxf(`0\nELLIPSE\n8\n0\n10\n1\n20\n2\n11\n${a}\n21\n${a}\n40\n0.5\n41\n0\n42\n${2 * Math.PI}\n`));
+    expect(r.warnings).toEqual([]);
+    const pts = r.edges[0].pts;
+    const u = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+    for (const p of pts) {
+      const dx = p.x - 1, dy = p.y - 2;
+      const along = dx * u.x + dy * u.y;
+      const across = -dx * u.y + dy * u.x;
+      expect((along / 3) ** 2 + (across / 1.5) ** 2).toBeCloseTo(1, 9);
+    }
+    const p = profileOf(dxf(`0\nELLIPSE\n10\n0\n20\n0\n11\n2\n21\n0\n40\n0.5\n41\n0\n42\n${2 * Math.PI}\n`));
+    expect(signedArea(p.pts)).toBeCloseTo(Math.PI * 2 * 1, 2);
+  });
+
+  it('sweeps a partial ELLIPSE CCW, or CW when the extrusion is flipped', () => {
+    const arc = (nz: number) =>
+      parseDxf(dxf(`0\nELLIPSE\n10\n0\n20\n0\n11\n2\n21\n0\n40\n0.5\n41\n0\n42\n${Math.PI / 2}\n230\n${nz}\n`)).edges[0].pts;
+    expect(arc(1).at(0)!.x).toBeCloseTo(2, 9);
+    expect(arc(1).at(-1)!.y).toBeCloseTo(1, 9);
+    expect(arc(-1).at(-1)!.y).toBeCloseTo(-1, 9);
+  });
 });
 
 describe('chaining', () => {
